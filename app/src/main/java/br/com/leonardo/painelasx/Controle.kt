@@ -90,6 +90,7 @@ class Controle : AccessibilityService() {
         seguro("procurar atualizacao") { Atualizador.verificarEmSegundoPlano(this) }
         seguro("rotina") { Rotina.talvezRodar(this, "controle ligado") }
         seguro("servico fixo") { ServicoFixo.iniciar(this) }
+        seguro("limpar aviso") { Avisos.limpar(this, Avisos.ID_CONTROLE) }
         seguro("conector do Claude") { Conector.iniciar(this) }
         Registro.anotar("controle: ligado")
     }

@@ -27,7 +27,7 @@ object Atualizador {
     private const val JOB_ID = 4811
     @Volatile private var ocupado = false
 
-    private const val PERIODO = 30 * 60 * 1000L // de 30 em 30 minutos
+    private const val PERIODO = 15 * 60 * 1000L // de 15 em 15 minutos (tambem e o "despertador" do app)
 
     fun agendar(ctx: Context) {
         val js = ctx.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
@@ -59,12 +59,28 @@ object Atualizador {
         }
     }
 
-    fun verificarEmSegundoPlano(ctx: Context) {
-        Thread { verificar(ctx.applicationContext) { } }.start()
+    /** Se true, instala sem perguntar. Padrao: false (o Leonardo aprova cada atualizacao). */
+    fun sozinho(ctx: Context) = prefs(ctx).getBoolean("sozinho", false)
+    fun mudarSozinho(ctx: Context, v: Boolean) = prefs(ctx).edit().putBoolean("sozinho", v).apply()
+
+    /** Numero da versao nova ja encontrada e esperando aprovacao (0 = nenhuma). */
+    fun disponivel(ctx: Context): Int {
+        val n = prefs(ctx).getInt("disponivel", 0)
+        return if (n > BuildConfig.VERSION_CODE) n else 0
     }
 
-    /** Roda fora da tela principal (faz internet). [aviso] recebe frases para mostrar. */
-    fun verificar(ctx: Context, aviso: (String) -> Unit) {
+    /** Verificacao automatica (despertador, central acordou, app abriu): so AVISA, a nao ser que "sozinho" esteja ligado. */
+    fun verificarEmSegundoPlano(ctx: Context) {
+        val app = ctx.applicationContext
+        Thread { verificar(app, instalar = sozinho(app)) { } }.start()
+    }
+
+    /**
+     * Roda fora da tela principal (faz internet). [aviso] recebe frases para mostrar.
+     * instalar=false: so descobre e avisa ("Atualização disponível"). instalar=true: baixa e instala
+     * (usado quando o Leonardo aprova: toque no aviso, botão no app ou pedido pelo Claude).
+     */
+    fun verificar(ctx: Context, instalar: Boolean = true, aviso: (String) -> Unit) {
         if (ocupado) { aviso("Já estou verificando."); return }
         ocupado = true
         try {
@@ -92,6 +108,15 @@ object Atualizador {
                 if (a.optString("name") == NOME_APK) link = a.optString("browser_download_url")
             }
             if (link == null) { aviso("A versão $tag ainda não tem o arquivo do app."); return }
+
+            if (!instalar) {
+                if (prefs(ctx).getInt("disponivel", 0) != numero) Registro.anotar("atualizacao: $tag disponivel, esperando aprovacao")
+                prefs(ctx).edit().putInt("disponivel", numero).apply()
+                Avisos.atualizacaoDisponivel(ctx, tag)
+                aviso("Versão $tag disponível. Toque em \"Atualizar\" para instalar.")
+                return
+            }
+            Avisos.limpar(ctx, Avisos.ID_ATUALIZACAO)
 
             aviso("Baixando a versão $tag…")
             Registro.anotar("atualizacao: baixando $tag")
@@ -191,8 +216,10 @@ class ResultadoInstalacao : BroadcastReceiver() {
 class AtualizaJob : JobService() {
     override fun onStartJob(params: JobParameters?): Boolean {
         Registro.iniciar(this)
+        // Despertador: se o app tinha morrido, volta aqui (o Android 10 desta central permite).
+        ServicoFixo.iniciar(applicationContext)
         Thread {
-            Atualizador.verificar(applicationContext) { }
+            Atualizador.verificar(applicationContext, instalar = Atualizador.sozinho(applicationContext)) { }
             jobFinished(params, false)
         }.start()
         return true

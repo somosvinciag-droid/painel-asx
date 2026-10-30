@@ -63,6 +63,26 @@ class ServicoFixo : Service() {
         Registro.anotar("servico fixo: ligado")
         Conector.iniciar(this)
         Atualizador.agendar(this)
+        vigia.post(olharControle)
+    }
+
+    /** A cada 30 s: se o Controle estiver desligado, mostra o aviso "toque para religar". */
+    private val vigia = android.os.Handler(android.os.Looper.getMainLooper())
+    private var avisou = false
+    private val olharControle = object : Runnable {
+        override fun run() {
+            try {
+                if (Controle.ligado(this@ServicoFixo)) {
+                    if (avisou) { Avisos.limpar(this@ServicoFixo, Avisos.ID_CONTROLE); avisou = false }
+                } else if (!avisou) {
+                    Avisos.controleDesligado(this@ServicoFixo)
+                    Registro.anotar("aviso: Controle desligado, pedi para religar")
+                    avisou = true
+                }
+            } catch (_: Exception) {
+            }
+            vigia.postDelayed(this, 30_000)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -73,6 +93,7 @@ class ServicoFixo : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        vigia.removeCallbacks(olharControle)
         Registro.anotar("servico fixo: desligado pelo Android")
         super.onDestroy()
     }

@@ -125,6 +125,8 @@ object Conector {
         .put("tela_atual", Controle.ativo?.telaAtual ?: "")
         .put("app_aberto_na_frente", MainActivity.naTela)
         .put("rotina_ligada", Rotina.ligada(ctx))
+        .put("atualizacao_disponivel", Atualizador.disponivel(ctx).let { if (it > 0) "v$it" else "" })
+        .put("instala_sozinho", Atualizador.sozinho(ctx))
         .put("modelo", Build.MODEL)
         .put("android", Build.VERSION.RELEASE)
         .put("hora_central", System.currentTimeMillis())
