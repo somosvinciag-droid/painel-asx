@@ -44,6 +44,9 @@ class MainActivity : Activity() {
         /** true enquanto o app esta aberto na tela (para reabrir depois de atualizar). */
         @Volatile
         var naTela = false
+
+        /** Pedido vindo do microfone da barra lateral. */
+        const val ACAO_OUVIR = "br.com.leonardo.painelasx.OUVIR"
     }
 
     private val PEDIDO_VOZ = 1
@@ -71,6 +74,8 @@ class MainActivity : Activity() {
     private lateinit var botaoNavegacao: Button
     private lateinit var textoVolume: TextView
     private lateinit var permissoes: LinearLayout
+    private lateinit var textoViagens: TextView
+    private lateinit var textoJarvis: TextView
 
     private val relogio = Handler(Looper.getMainLooper())
     private val atualizarSinais = object : Runnable {
@@ -137,6 +142,7 @@ class MainActivity : Activity() {
     /** Veio do aviso "Atualização disponível": o toque do Leonardo É a aprovação. */
     private fun tratarPedido(i: Intent?) {
         if (i?.action == Avisos.ACAO_ATUALIZAR) aprovarAtualizacao()
+        if (i?.action == ACAO_OUVIR) relogio.postDelayed({ ouvir() }, 300)
     }
 
     private fun aprovarAtualizacao() {
@@ -257,6 +263,55 @@ class MainActivity : Activity() {
         // Permissões que faltam (só aparece se faltar algo)
         permissoes = cartao(direita, "Falta liberar")
 
+        // Barra lateral (estilo Android Auto)
+        val barra = cartao(direita, "Barra lateral")
+        barra.addView(rotulo("Fica do lado esquerdo, por cima de qualquer app, com os seus apps favoritos."))
+        barra.addView(interruptor("Mostrar a barra lateral", Barra.ligada(this)) { Barra.mudarLigada(this, it) })
+        barra.addView(botao("✏️  Escolher os apps da barra", BOTAO, TEXTO, 16f).apply {
+            setOnClickListener { escolherAppsDaBarra() }
+        }, alto())
+
+        // Jarvis e a tela do carro
+        val jv = cartao(direita, "Jarvis e o carro")
+        textoJarvis = TextView(this).apply {
+            setTextColor(TEXTO); textSize = 15f
+            setLineSpacing(0f, 1.3f)
+            setPadding(0, dp(6), 0, dp(4))
+        }
+        jv.addView(textoJarvis)
+        jv.addView(botao("🚗  Abrir a tela do carro", Color.parseColor("#B0001F"), Color.WHITE, 16f).apply {
+            setOnClickListener { Painel.abrir(this@MainActivity) }
+        }, alto())
+        jv.addView(interruptor("\"Iron Man\" no Spotify quando o carro liga", Jarvis.musicaDeEntrada(this)) {
+            Jarvis.mudarMusicaDeEntrada(this, it)
+        })
+        jv.addView(botao("▶  Testar as boas-vindas", BOTAO, OURO, 16f).apply {
+            setOnClickListener { Jarvis.partida(applicationContext) }
+        }, alto())
+        jv.addView(rotulo("Avisos no celular (estacionamento, lembretes): instale o app \"ntfy\" no celular e assine este canal:"))
+        jv.addView(botao("📋  Copiar o canal: " + Config.topicoNtfy(this), BOTAO, TEXTO, 14f).apply {
+            setOnClickListener {
+                val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("Canal ntfy", Config.topicoNtfy(this@MainActivity)))
+                mostrar("Canal copiado. No app ntfy do celular: + (assinar) e cole o nome.", falar = false)
+            }
+        }, alto())
+        jv.addView(interruptor("Já assinei o canal no celular", getSharedPreferences("config", MODE_PRIVATE).getBoolean("ntfy_ok", false)) {
+            getSharedPreferences("config", MODE_PRIVATE).edit().putBoolean("ntfy_ok", it).apply()
+        })
+
+        // Viagens (GPS)
+        val viag = cartao(direita, "Viagens")
+        textoViagens = TextView(this).apply {
+            setTextColor(TEXTO); textSize = 16f
+            setLineSpacing(0f, 1.3f)
+            setPadding(0, dp(6), 0, dp(4))
+        }
+        viag.addView(textoViagens)
+        viag.addView(botao("📍  Onde está o carro", BOTAO, TEXTO, 16f).apply {
+            setOnClickListener { executar("onde está o carro") }
+        }, alto())
+
         // Rotina
         val rotina = cartao(direita, "Quando o carro ligar")
         rotina.addView(interruptor("Rodar a rotina sozinho", Rotina.ligada(this)) {
@@ -295,6 +350,28 @@ class MainActivity : Activity() {
         claude.addView(botao("Gerar link novo (desliga o antigo)", FUNDO, CINZA, 14f).apply {
             setOnClickListener { gerarLinkNovo() }
         }, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(6) })
+        claude.addView(rotulo("Reinstalou o app ou trocou a central? Cole aqui o link antigo do conector para trazer tudo de volta:"))
+        val campoLink = EditText(this).apply {
+            hint = "https://…/mcp/…"
+            setHintTextColor(CINZA); setTextColor(TEXTO); textSize = 14f
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            background = fundo(FUNDO, 12, BORDA)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        claude.addView(campoLink, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(6) })
+        claude.addView(botao("♻  Recuperar com o link antigo", BOTAO, TEXTO, 15f).apply {
+            setOnClickListener {
+                val link = campoLink.text.toString()
+                mostrar("Recuperando…", falar = false)
+                Thread {
+                    val r = try { Conector.recuperar(applicationContext, link) } catch (e: Exception) { "Falhou: ${e.message}" }
+                    runOnUiThread {
+                        mostrar(r, falar = false)
+                        if (r.startsWith("Pronto")) reiniciarApp()
+                    }
+                }.start()
+            }
+        }, alto())
 
         // Atualizações
         val atual = cartao(direita, "Atualizações")
@@ -346,6 +423,27 @@ class MainActivity : Activity() {
         alertaAtualizar.visibility = if (n > 0) View.VISIBLE else View.GONE
         if (n > 0) textoAtualizar.text = "Atualização v$n disponível"
 
+        try {
+            val u = Viagens.ultima()
+            val s = Viagens.resumo(7)
+            val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale("pt", "BR"))
+            textoViagens.text = (if (u != null)
+                "Última: %.1f km · %d min · máx %d km/h (%s)\n".format(
+                    u.optDouble("km"), u.optLong("duracao_min"), u.optLong("vel_max_kmh"), fmt.format(java.util.Date(u.optLong("inicio"))))
+            else "Ainda sem viagens registradas.\n") +
+                "Últimos 7 dias: ${s.optInt("viagens")} viagens · ${s.optDouble("km_total")} km · ${s.optDouble("horas_dirigindo")} h" +
+                (if (s.optBoolean("em_andamento")) "\n🟢 Viagem em andamento" else "")
+        } catch (_: Exception) {
+        }
+        try {
+            val odo = Diario.odometro(this)
+            textoJarvis.text = "Limite de velocidade: ${Config.limite(this)} km/h (fale \"limite 100\")\n" +
+                "Tempo: ${Clima.curto()}\n" +
+                "Conversa com o Claude: " + (if (Config.jarvisConversa) "ligada" + (if (Config.jarvisAtlas) " (com a Atlas)" else "") else "falta a chave da API no servidor") + "\n" +
+                (if (odo != null) "Odômetro estimado: $odo km\n" else "Odômetro: fale \"odômetro 123456\"\n") +
+                Diario.manutencao(this).joinToString("\n") { (if (it.second) "⚠ " else "✓ ") + it.first }
+        } catch (_: Exception) {
+        }
         botaoMusica.text = "🎵  Música: " + Apps.nomeDe(this, Rotina.musica(this))
         botaoNavegacao.text = "🧭  GPS: " + Apps.nomeDe(this, Rotina.navegacao(this))
         textoVolume.text = "Volume ao ligar: ${Rotina.volume(this)}%"
@@ -372,6 +470,29 @@ class MainActivity : Activity() {
                         startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
                     }
                 }
+            }, alto())
+        }
+        if (!Musica.podeVerMusica(this)) {
+            falta = true
+            permissoes.addView(botao("Mostrar o nome da música na tela do carro", BOTAO, TEXTO, 15f).apply {
+                setOnClickListener {
+                    try { startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")) } catch (_: Exception) { }
+                    mostrar("Ligue o \"Painel ASX\" na lista e volte.", falar = false)
+                }
+            }, alto())
+        }
+        if (!Settings.System.canWrite(this)) {
+            falta = true
+            permissoes.addView(botao("Modo noite: deixar ajustar o brilho", BOTAO, TEXTO, 15f).apply {
+                setOnClickListener {
+                    try { startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName"))) } catch (_: Exception) { }
+                }
+            }, alto())
+        }
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            falta = true
+            permissoes.addView(botao("Câmera (foto para o Claude, experimental)", BOTAO, TEXTO, 15f).apply {
+                setOnClickListener { requestPermissions(arrayOf(Manifest.permission.CAMERA), 9) }
             }, alto())
         }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -426,6 +547,17 @@ class MainActivity : Activity() {
         if (falar) Voz.falar(t)
     }
 
+    /** Reinicia o app (depois de recuperar o backup). */
+    private fun reiniciarApp() {
+        relogio.postDelayed({
+            val i = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val pi = android.app.PendingIntent.getActivity(this, 5, i, android.app.PendingIntent.FLAG_IMMUTABLE)
+            (getSystemService(ALARM_SERVICE) as android.app.AlarmManager)
+                .set(android.app.AlarmManager.RTC, System.currentTimeMillis() + 1500, pi)
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }, 2500)
+    }
+
     private fun copiarLink() {
         if (!Conector.configurado()) { mostrar("O conector ainda não está configurado nesta versão.", falar = false); return }
         val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
@@ -471,6 +603,24 @@ class MainActivity : Activity() {
                 ed.apply()
                 atualizarEstados()
             }
+            .show()
+    }
+
+    private fun escolherAppsDaBarra() {
+        val todos = Apps.listar(this).filter { it.pacote != packageName }
+        val atuais = Barra.apps(this)
+        val marcados = BooleanArray(todos.size) { todos[it].pacote in atuais }
+        AlertDialog.Builder(this)
+            .setTitle("Apps da barra")
+            .setMultiChoiceItems(todos.map { it.nome }.toTypedArray(), marcados) { _, i, v -> marcados[i] = v }
+            .setPositiveButton("Salvar") { _, _ ->
+                val escolhidos = todos.filterIndexed { i, _ -> marcados[i] }.map { it.pacote }
+                // mantém a ordem antiga e põe os novos no fim
+                val ordem = atuais.filter { it in escolhidos } + escolhidos.filter { it !in atuais }
+                Barra.salvarApps(this, ordem)
+                mostrar("Barra atualizada.", falar = false)
+            }
+            .setNegativeButton("Cancelar", null)
             .show()
     }
 

@@ -97,6 +97,11 @@ object Conector {
                         continue
                     }
                     if (r.first != 200) { Registro.devolverParaEnviar(linhas); throw Exception("relatorio deu ${r.first}") }
+                    try {
+                        val o = JSONObject(r.second)
+                        Config.jarvisConversa = o.optBoolean("jarvis", false)
+                        Config.jarvisAtlas = o.optBoolean("atlas", false)
+                    } catch (_: Exception) { }
                     ultimoRelatorio = agora
                     mandouDiagnostico = true
                 }
@@ -131,6 +136,12 @@ object Conector {
         .put("modelo", Build.MODEL)
         .put("android", Build.VERSION.RELEASE)
         .put("hora_central", System.currentTimeMillis())
+        .put("velocidade_kmh", Carro.velocidadeKmh.toInt())
+        .put("limite_kmh", Config.limite(ctx))
+        .put("tocando", Musica.tocandoAgora(ctx) ?: "")
+        .put("clima", Clima.curto())
+        .put("odometro_estimado", Diario.odometro(ctx) ?: JSONObject.NULL)
+        .put("ntfy", Config.topicoNtfy(ctx))
 
     private fun executar(ctx: Context, c: JSONObject) {
         val id = c.optString("id")
@@ -159,7 +170,19 @@ object Conector {
                 }
                 "diagnostico" -> Diagnostico.texto(ctx)
                 "dados" -> LeitorCarro.dados(ctx).toString(2)
+                "viagens" -> Viagens.resumo(texto.toIntOrNull()?.coerceIn(1, 365) ?: 7).toString(2)
+                "onde" -> Viagens.ondeParou().toString(2)
                 "mapa" -> LeitorCarro.mapa(ctx)
+                "viagens_mapa" -> Viagens.resumo(texto.toIntOrNull()?.coerceIn(1, 365) ?: 7, comTrajeto = true).toString()
+                "manutencao" -> JSONObject()
+                    .put("texto", Diario.manutencaoTexto(ctx))
+                    .put("odometro_estimado", Diario.odometro(ctx) ?: JSONObject.NULL)
+                    .put("km_somados_gps", Math.round(Diario.kmGps(ctx)))
+                    .put("abastecimentos", Diario.abastecimentos(ctx)).toString(2)
+                "lugares" -> Lugares.lista(ctx).toString(2)
+                "backup" -> Backup.enviar(ctx)
+                "foto" -> FotoCamera.tirar(ctx, texto.ifBlank { null }).toString()
+                "falar" -> naTelaPrincipal { Voz.falar(texto, Voz.Tipo.IMPORTANTE); "Falei na central: \"$texto\"" }
                 "atualizar" -> {
                     val msgs = mutableListOf<String>()
                     Atualizador.verificar(ctx) { msgs.add(it) }
@@ -215,6 +238,31 @@ object Conector {
     }
 
     @Volatile private var chaveAppCache = ""
+
+    /** Pedido ao servidor do conector (fora da linha principal). */
+    fun enviar(caminho: String, corpo: JSONObject, leituraMs: Int = 20_000): Pair<Int, String> {
+        if (!configurado() || chaveAppCache.isEmpty()) return 0 to ""
+        return pedir("POST", caminho, corpo, leituraMs = leituraMs)
+    }
+
+    /**
+     * Instalação nova (ou central trocada): usa o link antigo do conector para provar que é o dono,
+     * fica com o MESMO link (o Claude não precisa de nada novo) e traz o backup de volta.
+     */
+    fun recuperar(ctx: Context, linkAntigo: String): String {
+        val token = linkAntigo.trim().substringAfter("/mcp/", "").trim('/', ' ')
+        if (token.length < 24) return "Isso não parece o link do conector (precisa ter /mcp/ no meio)."
+        preparar(ctx)
+        val r = pedir("POST", "/app/recuperar", JSONObject().put("mcp_antigo", token).put("chave", chaveApp(ctx)), semChave = true, leituraMs = 60_000)
+        if (r.first == 403 || r.first == 404) return "O servidor não aceitou esse link (não é o link atual do conector)."
+        if (r.first != 200) return "Sem resposta do servidor agora (${r.first}). Tente com internet."
+        prefs(ctx).edit().putString("mcp", token).putBoolean("registrado", true).apply()
+        val o = JSONObject(r.second)
+        val b = o.optJSONObject("backup")
+        val n = if (b != null) Backup.restaurar(ctx, b) else 0
+        Registro.anotar("conector: recuperado com o link antigo ($n itens do backup)")
+        return if (b != null) "Pronto! Recuperei $n ajustes e o histórico. O app vai reiniciar." else "Pronto! A central voltou a ser sua (não havia backup guardado)."
+    }
 
     /** Chamado antes de iniciar, para a chave estar pronta. */
     fun preparar(ctx: Context) {

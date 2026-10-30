@@ -14,14 +14,14 @@ Este é o app da central multimídia Android (modelo K4811, Android 13, 2 GB de 
 ## Publicar uma versão
 
 Cada push no `main` dispara `.github/workflows/montar.yml`: monta o APK (versionCode = número da execução),
-assina com a chave do segredo `CHAVE_BASE64` e cria a release `vN`. A central atualiza sozinha (de 30 em 30
+assina com a chave do segredo `CHAVE_BASE64` e cria a release `vN`. A central procura atualização (de 15 em 15
 minutos, quando acorda, quando o Controle liga, ou no botão "Procurar atualização"). Com o Controle ligado, ela
 mesma confirma a instalação; se o app estava aberto, reabre sozinho.
 
 ## Conector do Claude (`servidor/`)
 
 - Worker `painel-asx` na Cloudflare do Leonardo (segredos `CLOUDFLARE_API_TOKEN` e `CLOUDFLARE_ACCOUNT_ID`),
-  publicado pelo mesmo workflow antes do APK. O endereço entra no app como `BuildConfig.SERVIDOR`.
+  publicado pelo workflow `conector.yml` (só quando muda `servidor/**`). O endereço entra no app como `BuildConfig.SERVIDOR`.
 - Durable Object `Central`: estado, registro (erros), diagnóstico e fila de comandos.
 - A central se registra uma vez com uma chave aleatória dela (só o sha256 fica no servidor).
 - O link do Claude é `<servidor>/mcp/<token>`; o token é gerado no app (botão "Copiar link do conector").
@@ -59,3 +59,21 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
 - O app só vê do carro o que a central recebe (câmera de ré, botões do volante, etc.). O ar-condicionado do ASX é mecânico.
 - Nada de mexer na parte elétrica do carro.
 - Mensagens/ligações por voz: pelo Android Auto (ZLink) com "Ok Google", não por este app.
+
+## v14: Jarvis e carro automatizado
+
+- `TelaCarro` (preta e vermelha) abre quando o carro liga (central reinicia na partida -> `ServicoFixo` com uptime < 4 min
+  -> `Jarvis.partida`: Turbo, tela do carro, "Bem-vindo, Leonardo", tempo/leads de manhã, lembretes, "Iron Man" no Spotify).
+- `Carro` (GPS): limite de velocidade (`Config.limite`, padrão 110, "limite 100"), parado ligado 5 min, freada forte,
+  nota da viagem, chegada ao destino, "chegando em casa" (500 m). Ré (pela tela da câmera, precisa do Controle): volume 30%.
+- `Voz`: tipos RESPOSTA / IMPORTANTE (abaixa a música) / INFO (calada se houver música).
+- `Lugares` (favoritos: casa, mineirita, familia), `Musica` (Spotify por busca, rádio online Radio Browser),
+  `Clima` (Open-Meteo), `Relogio` (Turbo se memória < 20%, clima, modo noite pelo brilho, backup 6/6 h, fila),
+  `Diario` (odômetro, abastecimentos, manutenção, calibragem 15 dias, anotações/pedidos -> servidor), `Backup`,
+  `FotoCamera` (experimental).
+- Servidor: `/app/nota`, `/app/abastecimento`, `/app/lembrete` (alarme do Durable Object -> ntfy no celular),
+  `/app/backup`, `/app/recuperar` (link antigo do conector = dono; mantém o mesmo link), `/app/jarvis` (API do Claude).
+- Jarvis conversa só se existir o segredo `ANTHROPIC_API_KEY` no GitHub (o `conector.yml` passa para a Cloudflare);
+  `ATLAS_MCP_URL` (opcional) dá acesso de leitura à Atlas. Limite de 300 conversas/dia.
+- Ferramentas novas do conector (chamar com `acao` se não aparecerem): anotacoes_do_carro, abastecimentos_do_carro,
+  manutencao_do_carro, avisar_no_celular, falar_na_central, foto_da_camera, backup_do_carro; viagens_do_carro com_trajeto.

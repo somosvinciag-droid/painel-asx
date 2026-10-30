@@ -35,6 +35,8 @@ object LeitorCarro {
     private val TELAS_CAMERA = listOf("com.unisoc.reversecamera", "com.ivicar.avm")
 
     @Volatile private var iniciado = false
+    @Volatile private var appCtx: Context? = null
+    @Volatile private var ultimoModoCarro = 0L
     private val sinais = LinkedHashMap<String, JSONObject>()   // acao -> {hora, dados, vezes}
     private val ultimaAnotacao = HashMap<String, Long>()
     @Volatile private var acoesOuvidas = 0
@@ -48,6 +50,9 @@ object LeitorCarro {
         if (iniciado) return
         iniciado = true
         val app = ctx.applicationContext
+        appCtx = app
+        Carro.iniciar(app)
+        Viagens.iniciar(app)
         Thread({
             try {
                 val acoes = acoesDaFabrica(app)
@@ -114,6 +119,15 @@ object LeitorCarro {
             primeira = false
             try { Thread.sleep(3000) } catch (_: InterruptedException) { return }
         }
+    }
+
+    /** Faróis acesos, se a central mostrar isso num ajuste interno ("illum"/"lamp"); null = não sei. */
+    @Synchronized
+    fun faroisAcesos(): Boolean? {
+        val k = propsAtuais.keys.firstOrNull { val x = it.lowercase(); x.contains("illum") || x.contains("headlamp") || x.contains("backlight.car") }
+            ?: return null
+        val v = propsAtuais[k]?.trim()?.lowercase() ?: return null
+        return when (v) { "1", "true", "on" -> true; "0", "false", "off" -> false; else -> null }
     }
 
     // ------------------------------------------------------------------ mapa da central
@@ -260,10 +274,29 @@ object LeitorCarro {
         }.take(1500)
         val antes = sinais[acao]
         sinais[acao] = JSONObject().put("hora", agora).put("dados", dados).put("vezes", (antes?.optInt("vezes") ?: 0) + 1)
+        if (acao == "android.hardware.usb.action.USB_DEVICE_ATTACHED") modoCarro(dados)
         if (agora - (ultimaAnotacao[acao] ?: 0L) > 60_000) {
             ultimaAnotacao[acao] = agora
             Registro.anotar("sinal do carro: $acao ${dados.take(160)}".trim())
         }
+    }
+
+    /** Modo Carro: ligou o celular no USB -> libera memória e roda a rotina (no máximo 1x a cada 5 min). */
+    private fun modoCarro(dados: String) {
+        val ctx = appCtx ?: return
+        val agora = System.currentTimeMillis()
+        if (agora - ultimoModoCarro < 5 * 60_000) return
+        ultimoModoCarro = agora
+        val nome = Regex("mProductName=([^,]+)").find(dados)?.groupValues?.get(1) ?: "aparelho USB"
+        Registro.anotar("modo carro: $nome conectado — Turbo e rotina")
+        Thread {
+            try {
+                Thread.sleep(4000) // deixa o Android Auto/USB se acertar primeiro
+                Turbo.limpar(ctx)
+                Rotina.talvezRodar(ctx, "celular conectado")
+            } catch (_: Exception) {
+            }
+        }.start()
     }
 
     fun notarTela(pacote: String) {
@@ -272,6 +305,7 @@ object LeitorCarro {
             re = agora
             reDesde = System.currentTimeMillis()
             Registro.anotar(if (agora) "carro: ré engatada (câmera abriu)" else "carro: saiu da ré")
+            try { Carro.re(agora) } catch (_: Exception) { }
         }
     }
 
@@ -287,6 +321,8 @@ object LeitorCarro {
                 .put("altitude_m", if (l.hasAltitude()) Math.round(l.altitude) else JSONObject.NULL)
                 .put("precisao_m", if (l.hasAccuracy()) Math.round(l.accuracy) else JSONObject.NULL)
                 .put("hora", l.time)
+            try { Viagens.novaPosicao(l) } catch (_: Exception) { }
+            try { Carro.posicao(l) } catch (e: Exception) { Registro.anotar("ERRO carro: ${e.javaClass.simpleName}: ${e.message}") }
         }
         @Deprecated("Android antigo ainda chama isto")
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
@@ -298,7 +334,7 @@ object LeitorCarro {
         if (ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
         try {
             val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000L, 0f, ouvinteGps, Looper.getMainLooper())
+            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, ouvinteGps, Looper.getMainLooper())
             Registro.anotar("leitor: GPS ligado")
         } catch (e: Exception) {
             Registro.anotar("leitor: GPS não ligou (${e.javaClass.simpleName})")

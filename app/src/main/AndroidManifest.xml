@@ -16,6 +16,11 @@
     <!-- GPS da central: velocidade, posicao e direcao do carro. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Brilho da tela no modo noite (liberado uma vez nas configurações). -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <!-- Foto da câmera (experimental), só quando o Claude pede. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <queries>
         <intent>
@@ -47,6 +52,25 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Tela do carro (preta e vermelha): abre quando o carro liga. -->
+        <activity
+            android:name=".TelaCarro"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity="br.com.leonardo.painelasx.carro"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
+
+        <!-- Só para ver o nome da música que está tocando (acesso às notificações). -->
+        <service
+            android:name=".Ouvinte"
+            android:exported="true"
+            android:label="@string/nome_app"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
         <!-- O "controle": com a Acessibilidade ligada, faz o que o dedo faz na tela. -->
         <service

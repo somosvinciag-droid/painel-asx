@@ -63,7 +63,24 @@ class ServicoFixo : Service() {
         Registro.anotar("servico fixo: ligado")
         Conector.iniciar(this)
         Atualizador.agendar(this)
+        Voz.iniciar(this)
+        Lugares.iniciar(this)
         LeitorCarro.iniciar(this)
+        Barra.mostrar(this)
+        Relogio.iniciar(this)
+        // A central reinicia quando o carro dá a partida: se ligou há pouco, é o carro ligando.
+        if (android.os.SystemClock.elapsedRealtime() < 4 * 60_000L) {
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ Jarvis.partida(this) }, 6000)
+        }
+        try {
+            registerReceiver(desligando, android.content.IntentFilter(Intent.ACTION_SHUTDOWN))
+        } catch (_: Exception) {
+        }
+    }
+
+    /** A central vai desligar: fecha a viagem em andamento. */
+    private val desligando = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: android.content.Context, i: Intent) = Viagens.centralDesligando()
     }
 
     /** A cada 30 s: se o Controle estiver desligado, mostra o aviso "toque para religar". */
