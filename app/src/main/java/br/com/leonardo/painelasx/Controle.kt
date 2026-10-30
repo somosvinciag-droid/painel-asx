@@ -1,6 +1,8 @@
 package br.com.leonardo.painelasx
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.view.accessibility.AccessibilityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -33,13 +35,22 @@ class Controle : AccessibilityService() {
         )
         private val BOTOES_INSTALAR = listOf("Instalar", "Atualizar", "Install", "Update")
 
+        /**
+         * Esta central guarda a lista de Acessibilidade de um jeito diferente do Android
+         * normal (o Controle funcionava e o app dizia "desligado"). Por isso confere de 3 jeitos.
+         */
         fun ligado(ctx: Context): Boolean {
-            val lista = Settings.Secure.getString(
+            if (ativo != null) return true
+            try {
+                val am = ctx.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+                val lista = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+                if (lista.any { it.resolveInfo?.serviceInfo?.packageName == ctx.packageName }) return true
+            } catch (_: Exception) {
+            }
+            val texto = Settings.Secure.getString(
                 ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
             ) ?: return false
-            return lista.split(':').any {
-                it.startsWith(ctx.packageName + "/") && it.endsWith("Controle")
-            }
+            return texto.contains(ctx.packageName, ignoreCase = true)
         }
     }
 
