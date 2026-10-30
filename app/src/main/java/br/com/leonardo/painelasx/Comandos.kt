@@ -18,6 +18,7 @@ object Comandos {
         "\"tela inicial\", \"voltar\"",
         "\"toca em <texto do botão>\" (aperta o botão que tem esse texto na tela)",
         "\"rotina\" (roda a rotina de quando o carro liga)",
+        "\"turbo\" / \"limpar memória\" (fecha o que está parado e libera RAM)",
         "\"lê a tela\" (anota os botões da tela atual no diagnóstico)"
     )
 
@@ -81,6 +82,12 @@ object Comandos {
             val original = falado.trim().split(Regex("\\s+")).takeLast(alvo.split(" ").size).joinToString(" ")
             return if (ctl.clicarTexto(listOf(original, alvo))) "Toquei em $original."
             else "Não achei \"$original\" na tela."
+        }
+
+        // Turbo (liberar memoria)
+        if (t.contains("turbo") || t.contains("limpa a memoria") || t.contains("limpar memoria") ||
+            t.contains("limpa memoria") || t.contains("libera memoria") || t.contains("liberar memoria")) {
+            return Turbo.limpar(ctx)
         }
 
         // Rotina

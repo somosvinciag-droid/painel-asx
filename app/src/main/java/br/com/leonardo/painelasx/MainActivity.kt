@@ -141,6 +141,16 @@ class MainActivity : Activity() {
         }
         col.addView(resposta)
 
+        val turbo = botao("⚡  TURBO — liberar memória", Color.parseColor("#1F6F4A"), TEXTO, 21f)
+        turbo.setOnClickListener {
+            mostrar("Liberando memória…", falar = false)
+            Thread {
+                val r = Turbo.limpar(applicationContext)
+                runOnUiThread { mostrar(r, falar = false) }
+            }.start()
+        }
+        col.addView(turbo, LinearLayout.LayoutParams(-1, dp(76)).apply { topMargin = dp(6) })
+
         // Permissoes
         col.addView(titulo("Permissões"))
         estadoControle = info()
