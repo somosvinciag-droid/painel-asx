@@ -1,0 +1,219 @@
+package br.com.leonardo.painelasx
+
+import android.content.Context
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.util.Base64
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import java.security.SecureRandom
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+
+/**
+ * Liga a central ao Claude do Leonardo (servidor "painel-asx" na Cloudflare dele).
+ *  - manda o estado, os erros e o diagnostico;
+ *  - fica esperando comandos do Claude e devolve o resultado.
+ * Roda dentro do Controle (que fica sempre ligado), numa linha de trabalho propria.
+ */
+object Conector {
+    private val rodando = AtomicBoolean(false)
+    @Volatile var online = false
+        private set
+    @Volatile var ultimoErro = ""
+        private set
+
+    fun configurado() = BuildConfig.SERVIDOR.startsWith("https://")
+
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("conector", Context.MODE_PRIVATE)
+
+    private fun aleatorio(bytes: Int): String {
+        val b = ByteArray(bytes)
+        SecureRandom().nextBytes(b)
+        return Base64.encodeToString(b, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+    }
+
+    private fun chaveApp(ctx: Context): String {
+        val p = prefs(ctx)
+        return p.getString("chave", null) ?: aleatorio(32).also { p.edit().putString("chave", it).apply() }
+    }
+
+    private fun tokenMcp(ctx: Context): String {
+        val p = prefs(ctx)
+        return p.getString("mcp", null) ?: aleatorio(24).also { p.edit().putString("mcp", it).apply() }
+    }
+
+    /** O link que o Leonardo cola no Claude (Configurações > Conectores > Adicionar). */
+    fun linkDoClaude(ctx: Context) = BuildConfig.SERVIDOR + "/mcp/" + tokenMcp(ctx)
+
+    /** Troca o link (o antigo deixa de funcionar). */
+    fun gerarLinkNovo(ctx: Context) {
+        prefs(ctx).edit().putString("mcp", aleatorio(24)).putBoolean("registrado", false).apply()
+    }
+
+    fun iniciar(ctx: Context) {
+        if (!configurado()) return
+        if (!rodando.compareAndSet(false, true)) return
+        val app = ctx.applicationContext
+        preparar(app)
+        Thread({ laco(app) }, "conector").start()
+    }
+
+    private fun laco(ctx: Context) {
+        Registro.anotar("conector: ligando")
+        var espera = 3000L
+        var ultimoRelatorio = 0L
+        var mandouDiagnostico = false
+        while (true) {
+            try {
+                if (!prefs(ctx).getBoolean("registrado", false)) {
+                    val r = pedir("POST", "/app/registrar", JSONObject()
+                        .put("chave", chaveApp(ctx)).put("mcp", tokenMcp(ctx)), semChave = true)
+                    if (r.first == 403) {
+                        ultimoErro = "esta central foi registrada por outro aparelho"
+                        Registro.anotar("conector: RECUSADO — " + ultimoErro)
+                        Thread.sleep(10 * 60 * 1000L)
+                        continue
+                    }
+                    if (r.first != 200) throw Exception("registro deu ${r.first}")
+                    prefs(ctx).edit().putBoolean("registrado", true).apply()
+                    Registro.anotar("conector: registrado")
+                }
+
+                // Relatorio: estado + linhas novas do registro (+ diagnostico 1 vez por ligacao)
+                val agora = System.currentTimeMillis()
+                val linhas = Registro.pegarParaEnviar()
+                if (linhas.isNotEmpty() || agora - ultimoRelatorio > 60_000 || !mandouDiagnostico) {
+                    val corpo = JSONObject().put("estado", estado(ctx)).put("linhas", JSONArray(linhas))
+                    if (!mandouDiagnostico) corpo.put("diagnostico", Diagnostico.texto(ctx))
+                    val r = pedir("POST", "/app/relatorio", corpo)
+                    if (r.first == 403) {
+                        prefs(ctx).edit().putBoolean("registrado", false).apply()
+                        Registro.devolverParaEnviar(linhas)
+                        continue
+                    }
+                    if (r.first != 200) { Registro.devolverParaEnviar(linhas); throw Exception("relatorio deu ${r.first}") }
+                    ultimoRelatorio = agora
+                    mandouDiagnostico = true
+                }
+
+                // Espera comando do Claude (ate ~20 s)
+                val r = pedir("GET", "/app/comandos", null, leituraMs = 35_000)
+                if (r.first != 200) throw Exception("comandos deu ${r.first}")
+                online = true
+                ultimoErro = ""
+                espera = 3000L
+                val cmds = JSONObject(r.second).optJSONArray("comandos") ?: JSONArray()
+                for (i in 0 until cmds.length()) executar(ctx, cmds.getJSONObject(i))
+            } catch (e: Exception) {
+                if (online) Registro.anotar("conector: sem conexão (${e.javaClass.simpleName})")
+                online = false
+                ultimoErro = e.message ?: e.javaClass.simpleName
+                Thread.sleep(espera)
+                espera = (espera * 2).coerceAtMost(60_000L)
+            }
+        }
+    }
+
+    private fun estado(ctx: Context): JSONObject = JSONObject()
+        .put("versao_app", BuildConfig.VERSION_CODE)
+        .put("controle_ligado", Controle.ativo != null)
+        .put("tela_atual", Controle.ativo?.telaAtual ?: "")
+        .put("app_aberto_na_frente", MainActivity.naTela)
+        .put("rotina_ligada", Rotina.ligada(ctx))
+        .put("modelo", Build.MODEL)
+        .put("android", Build.VERSION.RELEASE)
+        .put("hora_central", System.currentTimeMillis())
+
+    private fun executar(ctx: Context, c: JSONObject) {
+        val id = c.optString("id")
+        val tipo = c.optString("tipo")
+        val texto = c.optString("texto")
+        val idade = System.currentTimeMillis() - c.optLong("criado", 0)
+        if (idade > 90_000) {
+            Registro.anotar("conector: ignorei comando atrasado ($tipo)")
+            return
+        }
+        Registro.anotar("claude pediu: $tipo ${texto.take(60)}".trim())
+        var ok = true
+        val resposta: String = try {
+            when (tipo) {
+                "comando" -> naTelaPrincipal { Comandos.executar(ctx, texto) }
+                "tela" -> naTelaPrincipal {
+                    Controle.ativo?.lerTela() ?: "O controle (Acessibilidade) está desligado na central."
+                }
+                "tocar" -> naTelaPrincipal {
+                    val ctl = Controle.ativo
+                    when {
+                        ctl == null -> "O controle (Acessibilidade) está desligado na central."
+                        ctl.clicarTexto(listOf(texto)) -> "Toquei em \"$texto\"."
+                        else -> { ok = false; "Não achei \"$texto\" na tela." }
+                    }
+                }
+                "diagnostico" -> Diagnostico.texto(ctx)
+                "atualizar" -> {
+                    val msgs = mutableListOf<String>()
+                    Atualizador.verificar(ctx) { msgs.add(it) }
+                    msgs.joinToString(" ")
+                }
+                else -> { ok = false; "Tipo de comando desconhecido: $tipo" }
+            }
+        } catch (e: Exception) {
+            ok = false
+            "Erro na central: ${e.javaClass.simpleName}: ${e.message}"
+        }
+        try {
+            pedir("POST", "/app/resultado", JSONObject().put("id", id).put("ok", ok).put("resposta", resposta))
+        } catch (e: Exception) {
+            Registro.anotar("conector: não consegui devolver o resultado (${e.message})")
+        }
+    }
+
+    /** Roda na linha principal do Android (abrir apps e tocar na tela precisam disso) e espera. */
+    private fun naTelaPrincipal(bloco: () -> String): String {
+        var r = "sem resposta"
+        val pronto = CountDownLatch(1)
+        Handler(Looper.getMainLooper()).post {
+            r = try { bloco() } catch (e: Exception) { "Erro: ${e.message}" }
+            pronto.countDown()
+        }
+        pronto.await(15, TimeUnit.SECONDS)
+        Thread.sleep(800) // deixa a tela mudar antes de responder
+        return r
+    }
+
+    private fun pedir(
+        metodo: String, caminho: String, corpo: JSONObject?,
+        semChave: Boolean = false, leituraMs: Int = 20_000
+    ): Pair<Int, String> {
+        val c = URL(BuildConfig.SERVIDOR + caminho).openConnection() as HttpURLConnection
+        c.requestMethod = metodo
+        c.connectTimeout = 15_000
+        c.readTimeout = leituraMs
+        c.setRequestProperty("User-Agent", "painel-asx/" + BuildConfig.VERSION_CODE)
+        if (!semChave) c.setRequestProperty("Authorization", "Bearer " + chaveAppCache)
+        if (corpo != null) {
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            c.outputStream.use { it.write(corpo.toString().toByteArray(Charsets.UTF_8)) }
+        }
+        val code = c.responseCode
+        val txt = try {
+            (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.readText() ?: ""
+        } catch (_: Exception) { "" }
+        c.disconnect()
+        return code to txt
+    }
+
+    @Volatile private var chaveAppCache = ""
+
+    /** Chamado antes de iniciar, para a chave estar pronta. */
+    fun preparar(ctx: Context) {
+        chaveAppCache = chaveApp(ctx)
+        tokenMcp(ctx)
+    }
+}

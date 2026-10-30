@@ -18,6 +18,8 @@ android {
         versionCode = numero
         versionName = "v$numero"
         buildConfigField("String", "REPO", "\"somosvinciag-droid/painel-asx\"")
+        // Endereco do conector na Cloudflare (o GitHub preenche ao montar).
+        buildConfigField("String", "SERVIDOR", "\"" + (System.getenv("SERVIDOR_URL") ?: "").trimEnd('/') + "\"")
     }
 
     buildFeatures { buildConfig = true }

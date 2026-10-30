@@ -1,0 +1,14 @@
+name = "painel-asx"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+# Um "cofre" so para a central do ASX: guarda o estado, o registro de erros
+# e a fila de comandos que o Claude manda para a central.
+[[durable_objects.bindings]]
+name = "CENTRAL"
+class_name = "Central"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Central"]

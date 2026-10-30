@@ -14,8 +14,20 @@ Este é o app da central multimídia Android (modelo K4811, Android 13, 2 GB de 
 ## Publicar uma versão
 
 Cada push no `main` dispara `.github/workflows/montar.yml`: monta o APK (versionCode = número da execução),
-assina com a chave do segredo `CHAVE_BASE64` e cria a release `vN`. A central atualiza sozinha (de 3 em 3
-horas, ou quando acorda, ou no botão "Procurar atualização").
+assina com a chave do segredo `CHAVE_BASE64` e cria a release `vN`. A central atualiza sozinha (de 30 em 30
+minutos, quando acorda, quando o Controle liga, ou no botão "Procurar atualização"). Com o Controle ligado, ela
+mesma confirma a instalação; se o app estava aberto, reabre sozinho.
+
+## Conector do Claude (`servidor/`)
+
+- Worker `painel-asx` na Cloudflare do Leonardo (segredos `CLOUDFLARE_API_TOKEN` e `CLOUDFLARE_ACCOUNT_ID`),
+  publicado pelo mesmo workflow antes do APK. O endereço entra no app como `BuildConfig.SERVIDOR`.
+- Durable Object `Central`: estado, registro (erros), diagnóstico e fila de comandos.
+- A central se registra uma vez com uma chave aleatória dela (só o sha256 fica no servidor).
+- O link do Claude é `<servidor>/mcp/<token>`; o token é gerado no app (botão "Copiar link do conector").
+- Ferramentas: estado_central, registro_central, diagnostico_central, ler_tela_central, comando_central,
+  tocar_na_tela, atualizar_app_central. Comandos com mais de 90 s são ignorados pela central.
+- Para ver erros do app: `registro_central` com filtro "ERRO" ou "QUEBROU".
 
 - A chave de assinatura fica **só** no segredo `CHAVE_BASE64` do GitHub. Nunca a coloque no repositório (é público).
 - **Nunca troque essa chave**: com outra chave o Android recusa a atualização e o Leonardo teria

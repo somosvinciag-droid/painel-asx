@@ -26,12 +26,30 @@ object Registro {
         }
     }
 
+    /** Linhas que ainda nao foram mandadas para o conector (o Claude le de la). */
+    private val paraEnviar = ArrayDeque<String>()
+
+    @Synchronized
+    fun pegarParaEnviar(): List<String> {
+        val l = paraEnviar.toList()
+        paraEnviar.clear()
+        return l
+    }
+
+    @Synchronized
+    fun devolverParaEnviar(l: List<String>) {
+        l.asReversed().forEach { paraEnviar.addFirst(it) }
+        while (paraEnviar.size > MAX) paraEnviar.removeFirst()
+    }
+
     @Synchronized
     fun anotar(texto: String) {
         val linha = hora.format(Date()) + "  " + texto
         if (linhas.lastOrNull()?.endsWith(texto) == true) return
         linhas.addLast(linha)
         while (linhas.size > MAX) linhas.removeFirst()
+        paraEnviar.addLast(linha)
+        while (paraEnviar.size > MAX) paraEnviar.removeFirst()
         try {
             arquivo?.writeText(linhas.joinToString("\n"))
         } catch (_: Exception) {

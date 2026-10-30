@@ -2,6 +2,8 @@ package br.com.leonardo.painelasx
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
@@ -47,6 +49,21 @@ class MainActivity : Activity() {
     private lateinit var botaoNavegacao: Button
     private lateinit var interruptorRotina: Switch
     private lateinit var textoVolume: TextView
+    private lateinit var estadoConector: TextView
+    private val relogio = android.os.Handler(android.os.Looper.getMainLooper())
+    private val atualizarConector = object : Runnable {
+        override fun run() {
+            if (::estadoConector.isInitialized) {
+                estadoConector.text = when {
+                    !Conector.configurado() -> "⚠️ Conector ainda não configurado nesta versão"
+                    Conector.online -> "✅ Conectado ao seu Claude — pode dar comandos pelo chat"
+                    Conector.ultimoErro.isNotEmpty() -> "⏳ Sem conexão com o servidor (${Conector.ultimoErro.take(60)}). Precisa de internet."
+                    else -> "⏳ Conectando…"
+                }
+            }
+            relogio.postDelayed(this, 3000)
+        }
+    }
 
     override fun onCreate(s: Bundle?) {
         super.onCreate(s)
@@ -55,16 +72,19 @@ class MainActivity : Activity() {
         Atualizador.agendar(this)
         montarTela()
         Atualizador.verificarEmSegundoPlano(this)
+        Conector.iniciar(this)
     }
 
     override fun onResume() {
         super.onResume()
         naTela = true
         atualizarEstados()
+        relogio.post(atualizarConector)
     }
 
     override fun onPause() {
         naTela = false
+        relogio.removeCallbacks(atualizarConector)
         super.onPause()
     }
 
@@ -187,6 +207,33 @@ class MainActivity : Activity() {
         val testar = botao("▶  Testar a rotina agora", CARTAO, OURO, 17f)
         testar.setOnClickListener { Rotina.rodar(this); mostrar("Rodando a rotina.") }
         col.addView(testar, alto())
+
+        // Conector do Claude
+        col.addView(titulo("Conectar ao meu Claude"))
+        estadoConector = info()
+        col.addView(estadoConector)
+        val copiar = botao("🔗  Copiar link do conector", OURO, Color.parseColor("#1A1206"), 18f)
+        copiar.setOnClickListener {
+            if (!Conector.configurado()) { mostrar("O conector ainda não está configurado nesta versão.", falar = false); return@setOnClickListener }
+            val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("Conector Painel ASX", Conector.linkDoClaude(this)))
+            AlertDialog.Builder(this)
+                .setTitle("Link copiado ✅")
+                .setMessage("Agora, no Claude (claude.ai):\n\n1. Configurações → Conectores\n2. Adicionar conector personalizado\n3. Nome: Painel ASX\n4. Cole o link no campo URL e salve.\n\nEsse link é como uma senha: não mande para ninguém.")
+                .setPositiveButton("OK", null)
+                .show()
+        }
+        col.addView(copiar, alto())
+        val novo = botao("Gerar link novo (desliga o antigo)", CARTAO, CINZA, 15f)
+        novo.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Gerar link novo?")
+                .setMessage("O link antigo para de funcionar e você vai ter de colar o novo no Claude.")
+                .setPositiveButton("Gerar") { _, _ -> Conector.gerarLinkNovo(this); mostrar("Link novo gerado. Copie e cole no Claude.", falar = false) }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
+        col.addView(novo, alto())
 
         // Diagnostico e atualizacao
         col.addView(titulo("Diagnóstico e atualização"))

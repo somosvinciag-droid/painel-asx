@@ -54,7 +54,9 @@ class Controle : AccessibilityService() {
         }
     }
 
-    private var ultimaTela = ""
+    @Volatile
+    var telaAtual = ""
+        private set
 
     private val acordou = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
@@ -87,6 +89,7 @@ class Controle : AccessibilityService() {
         seguro("reabrir depois de atualizar") { Atualizador.reabrirSePrecisar(this) }
         seguro("procurar atualizacao") { Atualizador.verificarEmSegundoPlano(this) }
         seguro("rotina") { Rotina.talvezRodar(this, "controle ligado") }
+        seguro("conector do Claude") { Conector.iniciar(this) }
         Registro.anotar("controle: ligado")
     }
 
@@ -127,8 +130,8 @@ class Controle : AccessibilityService() {
         if (e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val classe = e.className?.toString() ?: ""
             val tela = "$pacote / $classe"
-            if (tela != ultimaTela && pacote != packageName) {
-                ultimaTela = tela
+            if (tela != telaAtual && pacote != packageName) {
+                telaAtual = tela
                 Registro.anotar("tela: $tela")
             }
         }
