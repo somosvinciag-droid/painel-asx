@@ -32,7 +32,10 @@ object LeitorCarro {
         "com.nwd", "com.unisoc.reversecamera", "com.ivicar.avm", "com.android.car.setting",
         "com.bt.bc03", "com.txznet", "com.zjinnova.zlink", "com.sprd.camera"
     )
-    private val TELAS_CAMERA = listOf("com.unisoc.reversecamera", "com.ivicar.avm")
+    private val TELAS_CAMERA = listOf("com.nwd.backcar", "com.unisoc.reversecamera", "com.ivicar.avm")
+    /** A tela da câmera pisca sozinha quando a central liga/acorda: ignora a ré nesse começo. */
+    @Volatile private var ignorarReAte = 0L
+    @Volatile private var estadoMcu = ""
 
     @Volatile private var iniciado = false
     @Volatile private var appCtx: Context? = null
@@ -51,6 +54,7 @@ object LeitorCarro {
         iniciado = true
         val app = ctx.applicationContext
         appCtx = app
+        ignorarReAte = System.currentTimeMillis() + 60_000
         Carro.iniciar(app)
         Viagens.iniciar(app)
         Thread({
@@ -109,6 +113,7 @@ object LeitorCarro {
                         mudancas.addLast(System.currentTimeMillis().toString() + " " + linha)
                         while (mudancas.size > 80) mudancas.removeFirst()
                         val kl = k.lowercase()
+                        if (k == "sys.nwd.mcu.state") Rede.naTela { mudouMcu(v) }
                         if (kl.contains("reverse") || kl.contains("backcar")) {
                             Registro.anotar("carro: possível mudança de ré ($k=$v)")
                         }
@@ -275,6 +280,9 @@ object LeitorCarro {
         val antes = sinais[acao]
         sinais[acao] = JSONObject().put("hora", agora).put("dados", dados).put("vezes", (antes?.optInt("vezes") ?: 0) + 1)
         if (acao == "android.hardware.usb.action.USB_DEVICE_ATTACHED") modoCarro(dados)
+        if (acao == "com.nwd.action.ACTION_MCU_STATE_CHANGE") {
+            Regex("extra_mcu_state=(\\d+)").find(dados)?.groupValues?.get(1)?.let { mudouMcu(it) }
+        }
         if (agora - (ultimaAnotacao[acao] ?: 0L) > 60_000) {
             ultimaAnotacao[acao] = agora
             Registro.anotar("sinal do carro: $acao ${dados.take(160)}".trim())
@@ -299,8 +307,29 @@ object LeitorCarro {
         }.start()
     }
 
+    /**
+     * A central não reinicia sempre: com o carro desligado ela "dorme" (estado 3) e depois acorda.
+     * Dormiu -> fecha a viagem. Acordou -> Jarvis dá as boas-vindas.
+     */
+    fun mudouMcu(novo: String) {
+        val antes = estadoMcu
+        if (novo == antes) return
+        estadoMcu = novo
+        val ctx = appCtx ?: return
+        if (novo == "3") {
+            Registro.anotar("central: dormiu (carro desligado)")
+            try { Viagens.centralDesligando() } catch (_: Exception) { }
+        } else if (antes == "3") {
+            Registro.anotar("central: acordou (carro ligado)")
+            ignorarReAte = System.currentTimeMillis() + 45_000
+            Rede.naTela { Jarvis.partida(ctx) }
+        }
+    }
+
     fun notarTela(pacote: String) {
-        val agora = TELAS_CAMERA.any { pacote.startsWith(it) }
+        val naCamera = TELAS_CAMERA.any { pacote.startsWith(it) }
+        if (naCamera && System.currentTimeMillis() < ignorarReAte) return
+        val agora = naCamera
         if (agora != re) {
             re = agora
             reDesde = System.currentTimeMillis()
