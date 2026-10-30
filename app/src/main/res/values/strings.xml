@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nome_app">Painel ASX</string>
+    <string name="descricao_acessibilidade">Deixa o Painel ASX abrir apps, tocar em botões e voltar à tela inicial quando você der um comando de voz, rodar a rotina ao ligar o carro e instalar as atualizações do próprio app. Ele também anota quais telas a central abre (por exemplo, a câmera de ré) para o diagnóstico. Nada sai da central sem você tocar em "Enviar diagnóstico".</string>
+</resources>
