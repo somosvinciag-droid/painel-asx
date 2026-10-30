@@ -89,6 +89,7 @@ class Controle : AccessibilityService() {
         seguro("reabrir depois de atualizar") { Atualizador.reabrirSePrecisar(this) }
         seguro("procurar atualizacao") { Atualizador.verificarEmSegundoPlano(this) }
         seguro("rotina") { Rotina.talvezRodar(this, "controle ligado") }
+        seguro("servico fixo") { ServicoFixo.iniciar(this) }
         seguro("conector do Claude") { Conector.iniciar(this) }
         Registro.anotar("controle: ligado")
     }

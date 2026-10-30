@@ -8,6 +8,9 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <queries>
         <intent>
@@ -51,6 +54,16 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/acessibilidade" />
+        </service>
+
+        <!-- Mantem o app e o conector do Claude ligados (a central nao o fecha por falta de memoria). -->
+        <service
+            android:name=".ServicoFixo"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Mantém a ligação entre a central multimídia do carro e o assistente do dono." />
         </service>
 
         <!-- Procura atualizacao de tempos a tempos, quando ha internet. -->

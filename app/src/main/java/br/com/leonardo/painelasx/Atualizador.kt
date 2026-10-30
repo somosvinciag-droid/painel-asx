@@ -211,6 +211,8 @@ class Inicio : BroadcastReceiver() {
         Registro.iniciar(ctx)
         Registro.anotar("central: ${intent.action?.substringAfterLast('.')}")
         Atualizador.agendar(ctx)
+        // Ao ligar a central e depois de atualizar, o Android deixa iniciar o servico fixo daqui.
+        ServicoFixo.iniciar(ctx)
         // Depois de uma atualizacao, quem reabre o app e o Controle, quando o Android o religa
         // (daqui o Android nao deixa abrir telas).
     }
