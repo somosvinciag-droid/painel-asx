@@ -64,6 +64,7 @@ class ServicoFixo : Service() {
         Conector.iniciar(this)
         Atualizador.agendar(this)
         LeitorCarro.iniciar(this)
+        Barra.mostrar(this)
         try {
             registerReceiver(desligando, android.content.IntentFilter(Intent.ACTION_SHUTDOWN))
         } catch (_: Exception) {

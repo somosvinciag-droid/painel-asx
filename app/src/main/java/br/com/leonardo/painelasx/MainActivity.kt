@@ -44,6 +44,9 @@ class MainActivity : Activity() {
         /** true enquanto o app esta aberto na tela (para reabrir depois de atualizar). */
         @Volatile
         var naTela = false
+
+        /** Pedido vindo do microfone da barra lateral. */
+        const val ACAO_OUVIR = "br.com.leonardo.painelasx.OUVIR"
     }
 
     private val PEDIDO_VOZ = 1
@@ -138,6 +141,7 @@ class MainActivity : Activity() {
     /** Veio do aviso "Atualização disponível": o toque do Leonardo É a aprovação. */
     private fun tratarPedido(i: Intent?) {
         if (i?.action == Avisos.ACAO_ATUALIZAR) aprovarAtualizacao()
+        if (i?.action == ACAO_OUVIR) relogio.postDelayed({ ouvir() }, 300)
     }
 
     private fun aprovarAtualizacao() {
@@ -257,6 +261,14 @@ class MainActivity : Activity() {
         // ---------- coluna da direita: cartões ----------
         // Permissões que faltam (só aparece se faltar algo)
         permissoes = cartao(direita, "Falta liberar")
+
+        // Barra lateral (estilo Android Auto)
+        val barra = cartao(direita, "Barra lateral")
+        barra.addView(rotulo("Fica do lado esquerdo, por cima de qualquer app, com os seus apps favoritos."))
+        barra.addView(interruptor("Mostrar a barra lateral", Barra.ligada(this)) { Barra.mudarLigada(this, it) })
+        barra.addView(botao("✏️  Escolher os apps da barra", BOTAO, TEXTO, 16f).apply {
+            setOnClickListener { escolherAppsDaBarra() }
+        }, alto())
 
         // Viagens (GPS)
         val viag = cartao(direita, "Viagens")
@@ -496,6 +508,24 @@ class MainActivity : Activity() {
                 ed.apply()
                 atualizarEstados()
             }
+            .show()
+    }
+
+    private fun escolherAppsDaBarra() {
+        val todos = Apps.listar(this).filter { it.pacote != packageName }
+        val atuais = Barra.apps(this)
+        val marcados = BooleanArray(todos.size) { todos[it].pacote in atuais }
+        AlertDialog.Builder(this)
+            .setTitle("Apps da barra")
+            .setMultiChoiceItems(todos.map { it.nome }.toTypedArray(), marcados) { _, i, v -> marcados[i] = v }
+            .setPositiveButton("Salvar") { _, _ ->
+                val escolhidos = todos.filterIndexed { i, _ -> marcados[i] }.map { it.pacote }
+                // mantém a ordem antiga e põe os novos no fim
+                val ordem = atuais.filter { it in escolhidos } + escolhidos.filter { it !in atuais }
+                Barra.salvarApps(this, ordem)
+                mostrar("Barra atualizada.", falar = false)
+            }
+            .setNegativeButton("Cancelar", null)
             .show()
     }
 
