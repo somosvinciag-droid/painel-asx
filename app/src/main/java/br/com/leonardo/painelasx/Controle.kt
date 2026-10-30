@@ -120,9 +120,15 @@ class Controle : AccessibilityService() {
         val pacote = e.packageName?.toString() ?: return
 
         if (confirmarInstalacao && pacote in INSTALADORES) {
-            if (clicarTexto(BOTOES_INSTALAR)) {
-                Registro.anotar("atualizacao: confirmei a instalacao")
-                confirmarInstalacao = false
+            // A janela do Android pode demorar a mostrar o botao: tenta algumas vezes.
+            val h = android.os.Handler(android.os.Looper.getMainLooper())
+            for (atraso in listOf(0L, 400L, 1000L, 2000L, 3500L, 6000L)) {
+                h.postDelayed({
+                    if (confirmarInstalacao && clicarTexto(BOTOES_INSTALAR)) {
+                        Registro.anotar("atualizacao: confirmei a instalacao")
+                        confirmarInstalacao = false
+                    }
+                }, atraso)
             }
             return
         }
@@ -177,6 +183,24 @@ class Controle : AccessibilityService() {
 
     /** Os textos e os nomes dos botoes da tela atual (para o diagnostico). */
     fun lerTela(): String {
+        // So agora (quando alguem pede) olha tambem os detalhes "escondidos" da tela; depois volta ao leve.
+        val info = serviceInfo
+        val antes = info?.flags ?: 0
+        try {
+            if (info != null) {
+                info.flags = antes or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+                serviceInfo = info
+            }
+            return lerTelaAgora()
+        } finally {
+            if (info != null) {
+                info.flags = antes
+                serviceInfo = info
+            }
+        }
+    }
+
+    private fun lerTelaAgora(): String {
         val sb = StringBuilder()
         val raiz = rootInActiveWindow ?: return "(nao consegui ler a tela)"
         sb.append("app: ").append(raiz.packageName).append('\n')
