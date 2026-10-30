@@ -27,15 +27,36 @@ object Atualizador {
     private const val JOB_ID = 4811
     @Volatile private var ocupado = false
 
+    private const val PERIODO = 30 * 60 * 1000L // de 30 em 30 minutos
+
     fun agendar(ctx: Context) {
         val js = ctx.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
-        if (js.allPendingJobs.any { it.id == JOB_ID }) return
+        if (js.getPendingJob(JOB_ID)?.intervalMillis == PERIODO) return
         val job = JobInfo.Builder(JOB_ID, ComponentName(ctx, AtualizaJob::class.java))
             .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-            .setPeriodic(3 * 60 * 60 * 1000L) // de 3 em 3 horas
+            .setPeriodic(PERIODO)
             .setPersisted(true)
             .build()
         js.schedule(job)
+    }
+
+    /** Se a atualizacao acontecer com o app aberto, ele abre de novo sozinho depois. */
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("atualizacao", Context.MODE_PRIVATE)
+
+    fun marcarReabrir(ctx: Context, sim: Boolean) =
+        prefs(ctx).edit().putBoolean("reabrir", sim).apply()
+
+    fun reabrirSePrecisar(ctx: Context) {
+        if (!prefs(ctx).getBoolean("reabrir", false)) return
+        marcarReabrir(ctx, false)
+        try {
+            ctx.startActivity(
+                Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            Registro.anotar("atualizacao: reabri o app (v${BuildConfig.VERSION_CODE})")
+        } catch (e: Exception) {
+            Registro.anotar("atualizacao: nao consegui reabrir (${e.message})")
+        }
     }
 
     fun verificarEmSegundoPlano(ctx: Context) {
@@ -122,6 +143,7 @@ object Atualizador {
                 apk.inputStream().use { it.copyTo(saida) }
                 s.fsync(saida)
             }
+            marcarReabrir(ctx, MainActivity.naTela)
             Controle.confirmarInstalacao = true
             val i = Intent(ctx, ResultadoInstalacao::class.java)
             val flags = PendingIntent.FLAG_UPDATE_CURRENT or
@@ -189,5 +211,7 @@ class Inicio : BroadcastReceiver() {
         Registro.iniciar(ctx)
         Registro.anotar("central: ${intent.action?.substringAfterLast('.')}")
         Atualizador.agendar(ctx)
+        // Depois de uma atualizacao, quem reabre o app e o Controle, quando o Android o religa
+        // (daqui o Android nao deixa abrir telas).
     }
 }

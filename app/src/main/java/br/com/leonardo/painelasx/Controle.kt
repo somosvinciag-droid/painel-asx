@@ -84,6 +84,8 @@ class Controle : AccessibilityService() {
             }
         }
         seguro("agendar atualizacao") { Atualizador.agendar(this) }
+        seguro("reabrir depois de atualizar") { Atualizador.reabrirSePrecisar(this) }
+        seguro("procurar atualizacao") { Atualizador.verificarEmSegundoPlano(this) }
         seguro("rotina") { Rotina.talvezRodar(this, "controle ligado") }
         Registro.anotar("controle: ligado")
     }

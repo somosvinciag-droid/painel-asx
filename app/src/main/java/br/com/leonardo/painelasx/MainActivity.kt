@@ -25,6 +25,12 @@ import android.widget.TextView
 /** Tela principal: falar comando, rotina, diagnostico e atualizacao. Letras grandes (carro). */
 class MainActivity : Activity() {
 
+    companion object {
+        /** true enquanto o app esta aberto na tela (para reabrir depois de atualizar). */
+        @Volatile
+        var naTela = false
+    }
+
     private val PEDIDO_VOZ = 1
     private val FUNDO = Color.parseColor("#0E1A2B")
     private val CARTAO = Color.parseColor("#17263D")
@@ -53,7 +59,13 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        naTela = true
         atualizarEstados()
+    }
+
+    override fun onPause() {
+        naTela = false
+        super.onPause()
     }
 
     // ---------------------------------------------------------------- tela
@@ -72,7 +84,7 @@ class MainActivity : Activity() {
             setTextColor(TEXTO); textSize = 30f; typeface = Typeface.DEFAULT_BOLD
         })
         col.addView(TextView(this).apply {
-            text = "versão v${BuildConfig.VERSION_CODE} · atualiza sozinho"
+            text = "versão v${BuildConfig.VERSION_CODE} · atualiza sozinho a cada 30 min e ao ligar o carro"
             setTextColor(CINZA); textSize = 15f
             setPadding(0, 0, 0, dp(18))
         })
