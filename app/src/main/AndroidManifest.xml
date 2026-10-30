@@ -98,6 +98,11 @@
 
         <!-- Procura atualizacao de tempos a tempos, quando ha internet. -->
         <service
+            android:name=".AcordaJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <service
             android:name=".AtualizaJob"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
@@ -109,6 +114,12 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <!-- A central acordando sem reiniciar (avisos da NWD) -->
+                <action android:name="com.nwd.action.ACTION_MCU_STATE_CHANGE" />
+                <action android:name="com.nwd.ACTION_AFTER_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="br.com.leonardo.painelasx.ACORDAR" />
             </intent-filter>
         </receiver>
 

@@ -236,8 +236,16 @@ class AtualizaJob : JobService() {
 class Inicio : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         Registro.iniciar(ctx)
-        Registro.anotar("central: ${intent.action?.substringAfterLast('.')}")
+        val acao = intent.action ?: ""
+        val estado = intent.extras?.let { e -> @Suppress("DEPRECATION") e.get("extra_mcu_state")?.toString() } ?: ""
+        Registro.anotar("central: ${acao.substringAfterLast('.')}" + (if (estado.isNotEmpty()) " (estado $estado)" else ""))
         Atualizador.agendar(ctx)
+        when {
+            acao == Despertador.ACAO -> { Despertador.talvezAcordou(ctx, "alarme"); return }
+            acao == "com.nwd.action.ACTION_MCU_STATE_CHANGE" && estado == "3" -> { Despertador.marcar(ctx.applicationContext); return }
+            acao == "com.nwd.action.ACTION_MCU_STATE_CHANGE" || acao == "com.nwd.ACTION_AFTER_BOOT_COMPLETED" ||
+                acao.endsWith("QUICKBOOT_POWERON") -> { Despertador.talvezAcordou(ctx, acao.substringAfterLast('.')); return }
+        }
         // Ao ligar a central e depois de atualizar, o Android deixa iniciar o servico fixo daqui.
         ServicoFixo.iniciar(ctx)
         // Depois de uma atualizacao, quem reabre o app e o Controle, quando o Android o religa
