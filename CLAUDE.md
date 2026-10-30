@@ -77,3 +77,16 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
   `ATLAS_MCP_URL` (opcional) dá acesso de leitura à Atlas. Limite de 300 conversas/dia.
 - Ferramentas novas do conector (chamar com `acao` se não aparecerem): anotacoes_do_carro, abastecimentos_do_carro,
   manutencao_do_carro, avisar_no_celular, falar_na_central, foto_da_camera, backup_do_carro; viagens_do_carro com_trajeto.
+
+## v15–v17: voz própria e partida
+
+- A central **não tem nenhum motor de voz** (TTS) do Android. Voz própria: `VozPropria` (sherpa-onnx v1.13.8 + Piper
+  `pt_BR-faber-medium`), pacote baixado uma vez da release `voz-1` (pré-lançamento, criada pelo workflow `voz.yml`;
+  NUNCA marcar como latest). API Kotlin copiada em `com/k2fsa/sherpa/onnx/` sem `System.loadLibrary`.
+- Ajustes por voz: "voz mais grave/fina", "fala mais rápido/devagar", "voz normal" (prefs `voz_grave`, `voz_vel`).
+- Saudação gravada em `files/voz/saudacao_{manha,tarde,noite}.pcm` (com fsync: a central perde energia de repente).
+- A central às vezes **não reinicia**: dorme (`com.nwd.action.ACTION_MCU_STATE_CHANGE extra_mcu_state=3`,
+  `sys.nwd.mcu.state`) e acorda. `LeitorCarro.mudouMcu` chama `Jarvis.partida` ao acordar.
+- Câmera de ré desta central: pacote `com.nwd.backcar` (pisca na partida; ignorada nos primeiros 45–60 s).
+- Ouvido do "Ei, Jarvis": pacote `ouvido-1` (workflow `ouvido.yml`, KWS gigaspeech 3.3M) já publicado; falta o app.
+- A Acessibilidade (Controle) é desligada pela central em várias partidas: é opcional, sem alerta.
