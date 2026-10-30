@@ -1,20 +1,27 @@
 package br.com.leonardo.painelasx
 
+import android.Manifest
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.speech.RecognizerIntent
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
@@ -24,7 +31,13 @@ import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 
-/** Tela principal: falar comando, rotina, diagnostico e atualizacao. Letras grandes (carro). */
+/**
+ * Tela principal, com cara de painel de carro:
+ *  - em cima, 3 sinais claros (Controle, Claude, Memória);
+ *  - alertas só quando precisa (Religar o Controle / Atualizar);
+ *  - botões grandes (Falar, Turbo);
+ *  - o resto em cartões. Em tela larga (a central), duas colunas.
+ */
 class MainActivity : Activity() {
 
     companion object {
@@ -34,33 +47,35 @@ class MainActivity : Activity() {
     }
 
     private val PEDIDO_VOZ = 1
-    private val FUNDO = Color.parseColor("#0E1A2B")
-    private val CARTAO = Color.parseColor("#17263D")
+
+    // Paleta
+    private val FUNDO = Color.parseColor("#0B1220")
+    private val CARTAO = Color.parseColor("#131C2E")
+    private val BORDA = Color.parseColor("#22304A")
+    private val BOTAO = Color.parseColor("#1B2740")
     private val OURO = Color.parseColor("#F2A93B")
+    private val TINTA_OURO = Color.parseColor("#1A1206")
+    private val VERDE = Color.parseColor("#2BB673")
+    private val VERMELHO = Color.parseColor("#E5484D")
     private val TEXTO = Color.parseColor("#EEF2F7")
-    private val CINZA = Color.parseColor("#9AA8BC")
+    private val CINZA = Color.parseColor("#8E9BB0")
 
     private lateinit var resposta: TextView
-    private lateinit var estadoControle: TextView
-    private lateinit var estadoInstalar: TextView
-    private lateinit var botaoControle: Button
-    private lateinit var botaoInstalar: Button
+    private lateinit var chipControle: TextView
+    private lateinit var chipClaude: TextView
+    private lateinit var chipMemoria: TextView
+    private lateinit var alertaReligar: View
+    private lateinit var alertaAtualizar: View
+    private lateinit var textoAtualizar: TextView
     private lateinit var botaoMusica: Button
     private lateinit var botaoNavegacao: Button
-    private lateinit var interruptorRotina: Switch
     private lateinit var textoVolume: TextView
-    private lateinit var estadoConector: TextView
-    private val relogio = android.os.Handler(android.os.Looper.getMainLooper())
-    private val atualizarConector = object : Runnable {
+    private lateinit var permissoes: LinearLayout
+
+    private val relogio = Handler(Looper.getMainLooper())
+    private val atualizarSinais = object : Runnable {
         override fun run() {
-            if (::estadoConector.isInitialized) {
-                estadoConector.text = when {
-                    !Conector.configurado() -> "⚠️ Conector ainda não configurado nesta versão"
-                    Conector.online -> "✅ Conectado ao seu Claude — pode dar comandos pelo chat"
-                    Conector.ultimoErro.isNotEmpty() -> "⏳ Sem conexão com o servidor (${Conector.ultimoErro.take(60)}). Precisa de internet."
-                    else -> "⏳ Conectando…"
-                }
-            }
+            atualizarEstados()
             relogio.postDelayed(this, 3000)
         }
     }
@@ -74,139 +89,184 @@ class MainActivity : Activity() {
         Atualizador.verificarEmSegundoPlano(this)
         ServicoFixo.iniciar(this)
         Conector.iniciar(this)
-        if (android.os.Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 7)
-        }
+        tratarPedido(intent)
+        pedirPermissoesSimples()
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        tratarPedido(intent)
     }
 
     override fun onResume() {
         super.onResume()
         naTela = true
-        atualizarEstados()
-        relogio.post(atualizarConector)
+        relogio.post(atualizarSinais)
     }
 
     override fun onPause() {
         naTela = false
-        relogio.removeCallbacks(atualizarConector)
+        relogio.removeCallbacks(atualizarSinais)
         super.onPause()
+    }
+
+    override fun onRequestPermissionsResult(codigo: Int, perms: Array<out String>, resultados: IntArray) {
+        super.onRequestPermissionsResult(codigo, perms, resultados)
+        LeitorCarro.ligarGps(applicationContext)
+        atualizarEstados()
+    }
+
+    private fun pedirPermissoesSimples() {
+        val faltam = mutableListOf<String>()
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            faltam.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            faltam.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (faltam.isNotEmpty()) requestPermissions(faltam.toTypedArray(), 7)
+    }
+
+    // ---------------------------------------------------------------- aprovação
+
+    /** Veio do aviso "Atualização disponível": o toque do Leonardo É a aprovação. */
+    private fun tratarPedido(i: Intent?) {
+        if (i?.action == Avisos.ACAO_ATUALIZAR) aprovarAtualizacao()
+    }
+
+    private fun aprovarAtualizacao() {
+        mostrar("Atualizando… o app fecha e abre de novo. Depois, toque em \"Religar\" se aparecer.", falar = false)
+        Registro.anotar("atualizacao: aprovada pelo Leonardo no painel")
+        Thread {
+            Atualizador.verificar(applicationContext, instalar = true) { m -> runOnUiThread { mostrar(m, falar = false) } }
+        }.start()
+    }
+
+    private fun abrirAcessibilidade() {
+        val componente = packageName + "/" + Controle::class.java.name
+        val i = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+        i.putExtra(":settings:fragment_args_key", componente)
+        i.putExtra(":settings:show_fragment_args", Bundle().apply { putString(":settings:fragment_args_key", componente) })
+        try {
+            startActivity(i)
+            mostrar("Toque em \"Painel ASX\", ligue a chave e toque em Permitir.", falar = false)
+        } catch (e: Exception) {
+            mostrar("Abra Configurações → Acessibilidade → Painel ASX.", falar = false)
+        }
     }
 
     // ---------------------------------------------------------------- tela
 
     private fun montarTela() {
-        val rolagem = ScrollView(this).apply { setBackgroundColor(FUNDO) }
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(28), dp(22), dp(28), dp(40))
+        val larga = resources.displayMetrics.let { it.widthPixels / it.density } >= 720
+        val raiz = LinearLayout(this).apply {
+            orientation = if (larga) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+            setBackgroundColor(FUNDO)
         }
-        rolagem.addView(col)
-        setContentView(rolagem)
+        setContentView(raiz)
 
-        col.addView(TextView(this).apply {
+        val esquerda = coluna()
+        val direita = coluna()
+        if (larga) {
+            raiz.addView(rolar(esquerda), LinearLayout.LayoutParams(0, -1, 1f))
+            raiz.addView(rolar(direita), LinearLayout.LayoutParams(0, -1, 1.15f))
+        } else {
+            val tudo = coluna()
+            tudo.addView(esquerda); tudo.addView(direita)
+            raiz.addView(rolar(tudo), LinearLayout.LayoutParams(-1, -1))
+        }
+
+        // ---------- coluna da esquerda: estado + ações ----------
+        val topo = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        topo.addView(TextView(this).apply {
             text = "Painel ASX"
-            setTextColor(TEXTO); textSize = 30f; typeface = Typeface.DEFAULT_BOLD
+            setTextColor(TEXTO); textSize = 28f; typeface = Typeface.DEFAULT_BOLD
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        topo.addView(TextView(this).apply {
+            text = "v${BuildConfig.VERSION_CODE}"
+            setTextColor(CINZA); textSize = 14f
+            background = fundo(BOTAO, 99)
+            setPadding(dp(12), dp(4), dp(12), dp(4))
         })
-        col.addView(TextView(this).apply {
-            text = "versão v${BuildConfig.VERSION_CODE} · atualiza sozinho a cada 30 min e ao ligar o carro"
-            setTextColor(CINZA); textSize = 15f
-            setPadding(0, 0, 0, dp(18))
-        })
+        esquerda.addView(topo)
 
-        // Falar
-        val falar = botao("🎤  FALAR COMANDO", OURO, Color.parseColor("#1A1206"), 26f)
-        falar.setOnClickListener { ouvir() }
-        col.addView(falar, LinearLayout.LayoutParams(-1, dp(96)))
+        val sinais = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        chipControle = chip(); chipClaude = chip(); chipMemoria = chip()
+        sinais.addView(chipControle, pesoChip(0)); sinais.addView(chipClaude, pesoChip(8)); sinais.addView(chipMemoria, pesoChip(8))
+        esquerda.addView(sinais, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
 
-        val linha = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(12), 0, 0)
+        // Alertas (só aparecem quando precisa)
+        alertaReligar = alerta(
+            VERMELHO, "Controle desligado",
+            "Sem ele eu não consigo ler a tela nem tocar nos botões.", "Religar"
+        ) { abrirAcessibilidade() }
+        esquerda.addView(alertaReligar)
+        textoAtualizar = TextView(this)
+        alertaAtualizar = alerta(
+            OURO, "Atualização disponível",
+            "Toque em Atualizar aqui, ou peça ao Claude no celular: \"pode atualizar\".", "Atualizar", textoAtualizar
+        ) { aprovarAtualizacao() }
+        esquerda.addView(alertaAtualizar)
+
+        // Botões grandes
+        val grandes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val falar = botao("🎤\nFalar", OURO, TINTA_OURO, 22f).apply { setOnClickListener { ouvir() } }
+        val turbo = botao("⚡\nTurbo", Color.parseColor("#1E7A4F"), Color.WHITE, 22f).apply {
+            setOnClickListener {
+                mostrar("Liberando memória…", falar = false)
+                Thread {
+                    val r = Turbo.limpar(applicationContext)
+                    runOnUiThread { mostrar(r, falar = false); atualizarEstados() }
+                }.start()
+            }
         }
+        grandes.addView(falar, LinearLayout.LayoutParams(0, dp(116), 1f))
+        grandes.addView(turbo, LinearLayout.LayoutParams(0, dp(116), 1f).apply { leftMargin = dp(12) })
+        esquerda.addView(grandes, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) })
+
+        // Comando escrito
+        val linha = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val campo = EditText(this).apply {
-            hint = "ou escreva um comando…"
-            setHintTextColor(CINZA); setTextColor(TEXTO); textSize = 18f
+            hint = "ou escreva: \"abre o Waze\", \"volume 30\"…"
+            setHintTextColor(CINZA); setTextColor(TEXTO); textSize = 17f
             inputType = InputType.TYPE_CLASS_TEXT
             imeOptions = EditorInfo.IME_ACTION_GO
-            background = fundo(CARTAO, 14)
-            setPadding(dp(16), dp(12), dp(16), dp(12))
+            background = fundo(CARTAO, 14, BORDA)
+            setPadding(dp(16), dp(10), dp(16), dp(10))
         }
-        val ir = botao("Fazer", CARTAO, TEXTO, 18f)
+        val ir = botao("Fazer", BOTAO, TEXTO, 17f)
         val fazer = { executar(campo.text.toString()); campo.setText("") }
         ir.setOnClickListener { fazer() }
         campo.setOnEditorActionListener { _, _, _ -> fazer(); true }
-        linha.addView(campo, LinearLayout.LayoutParams(0, dp(60), 1f))
-        linha.addView(ir, LinearLayout.LayoutParams(dp(120), dp(60)).apply { leftMargin = dp(10) })
-        col.addView(linha)
+        linha.addView(campo, LinearLayout.LayoutParams(0, dp(58), 1f))
+        linha.addView(ir, LinearLayout.LayoutParams(dp(100), dp(58)).apply { leftMargin = dp(10) })
+        esquerda.addView(linha, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
 
         resposta = TextView(this).apply {
-            setTextColor(OURO); textSize = 20f
-            setPadding(0, dp(14), 0, dp(6))
-            text = ""
+            setTextColor(OURO); textSize = 18f
+            setPadding(dp(4), dp(12), dp(4), dp(4))
         }
-        col.addView(resposta)
+        esquerda.addView(resposta)
 
-        val turbo = botao("⚡  TURBO — liberar memória", Color.parseColor("#1F6F4A"), TEXTO, 21f)
-        turbo.setOnClickListener {
-            mostrar("Liberando memória…", falar = false)
-            Thread {
-                val r = Turbo.limpar(applicationContext)
-                runOnUiThread { mostrar(r, falar = false) }
-            }.start()
-        }
-        col.addView(turbo, LinearLayout.LayoutParams(-1, dp(76)).apply { topMargin = dp(6) })
-
-        // Permissoes
-        col.addView(titulo("Permissões"))
-        estadoControle = info()
-        botaoControle = botao("Ligar controle (Acessibilidade)", CARTAO, TEXTO, 17f)
-        botaoControle.setOnClickListener {
-            AlertDialog.Builder(this)
-                .setTitle("Ligar o controle")
-                .setMessage("Na próxima tela, toque em \"Painel ASX\" e ligue a chave. O Android vai mostrar um aviso: é normal, é o que deixa o app tocar na tela por você.")
-                .setPositiveButton("Abrir") { _, _ -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                .setNegativeButton("Agora não", null)
-                .show()
-        }
-        estadoInstalar = info()
-        botaoInstalar = botao("Permitir atualizações automáticas", CARTAO, TEXTO, 17f)
-        botaoInstalar.setOnClickListener {
-            startActivity(
-                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
-            )
-        }
-        col.addView(estadoControle); col.addView(botaoControle, alto())
-        col.addView(estadoInstalar); col.addView(botaoInstalar, alto())
+        // ---------- coluna da direita: cartões ----------
+        // Permissões que faltam (só aparece se faltar algo)
+        permissoes = cartao(direita, "Falta liberar")
 
         // Rotina
-        col.addView(titulo("Quando o carro ligar"))
-        interruptorRotina = Switch(this).apply {
-            text = "Rodar a rotina sozinho"
-            setTextColor(TEXTO); textSize = 19f
-            isChecked = Rotina.ligada(this@MainActivity)
-            setPadding(0, dp(6), 0, dp(6))
-            setOnCheckedChangeListener { _, v -> Rotina.prefs(this@MainActivity).edit().putBoolean("ligada", v).apply() }
-        }
-        col.addView(interruptorRotina)
-
-        botaoMusica = botao("", CARTAO, TEXTO, 17f)
-        botaoMusica.setOnClickListener { escolherApp("musica", "App de música") }
-        botaoNavegacao = botao("", CARTAO, TEXTO, 17f)
-        botaoNavegacao.setOnClickListener { escolherApp("navegacao", "App de GPS") }
-        col.addView(botaoMusica, alto()); col.addView(botaoNavegacao, alto())
-
-        val tocar = Switch(this).apply {
-            text = "Dar play na música sozinho"
-            setTextColor(TEXTO); textSize = 17f
-            isChecked = Rotina.tocarSozinho(this@MainActivity)
-            setPadding(0, dp(10), 0, dp(6))
-            setOnCheckedChangeListener { _, v -> Rotina.prefs(this@MainActivity).edit().putBoolean("tocar", v).apply() }
-        }
-        col.addView(tocar)
-
-        textoVolume = info()
-        col.addView(textoVolume)
-        col.addView(SeekBar(this).apply {
+        val rotina = cartao(direita, "Quando o carro ligar")
+        rotina.addView(interruptor("Rodar a rotina sozinho", Rotina.ligada(this)) {
+            Rotina.prefs(this).edit().putBoolean("ligada", it).apply()
+        })
+        botaoMusica = botao("", BOTAO, TEXTO, 16f).apply { setOnClickListener { escolherApp("musica", "App de música") } }
+        botaoNavegacao = botao("", BOTAO, TEXTO, 16f).apply { setOnClickListener { escolherApp("navegacao", "App de GPS") } }
+        rotina.addView(botaoMusica, alto()); rotina.addView(botaoNavegacao, alto())
+        rotina.addView(interruptor("Dar play na música sozinho", Rotina.tocarSozinho(this)) {
+            Rotina.prefs(this).edit().putBoolean("tocar", it).apply()
+        })
+        textoVolume = rotulo("")
+        rotina.addView(textoVolume)
+        rotina.addView(SeekBar(this).apply {
             max = 100
             progress = Rotina.volume(this@MainActivity)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -217,88 +277,104 @@ class MainActivity : Activity() {
                 override fun onStartTrackingTouch(b: SeekBar?) {}
                 override fun onStopTrackingTouch(b: SeekBar?) {}
             })
-        }, LinearLayout.LayoutParams(-1, dp(56)))
+        }, LinearLayout.LayoutParams(-1, dp(48)))
+        rotina.addView(botao("▶  Testar a rotina agora", BOTAO, OURO, 16f).apply {
+            setOnClickListener { Rotina.rodar(this@MainActivity); mostrar("Rodando a rotina.") }
+        }, alto())
 
-        val testar = botao("▶  Testar a rotina agora", CARTAO, OURO, 17f)
-        testar.setOnClickListener { Rotina.rodar(this); mostrar("Rodando a rotina.") }
-        col.addView(testar, alto())
+        // Claude
+        val claude = cartao(direita, "Seu Claude")
+        claude.addView(rotulo("Peça pelo Claude (celular ou aqui) e eu faço na central."))
+        claude.addView(botao("🔗  Copiar link do conector", BOTAO, TEXTO, 16f).apply {
+            setOnClickListener { copiarLink() }
+        }, alto())
+        claude.addView(botao("Gerar link novo (desliga o antigo)", FUNDO, CINZA, 14f).apply {
+            setOnClickListener { gerarLinkNovo() }
+        }, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(6) })
 
-        // Conector do Claude
-        col.addView(titulo("Conectar ao meu Claude"))
-        estadoConector = info()
-        col.addView(estadoConector)
-        val copiar = botao("🔗  Copiar link do conector", OURO, Color.parseColor("#1A1206"), 18f)
-        copiar.setOnClickListener {
-            if (!Conector.configurado()) { mostrar("O conector ainda não está configurado nesta versão.", falar = false); return@setOnClickListener }
-            val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-            cm.setPrimaryClip(ClipData.newPlainText("Conector Painel ASX", Conector.linkDoClaude(this)))
-            AlertDialog.Builder(this)
-                .setTitle("Link copiado ✅")
-                .setMessage("Agora, no Claude (claude.ai):\n\n1. Configurações → Conectores\n2. Adicionar conector personalizado\n3. Nome: Painel ASX\n4. Cole o link no campo URL e salve.\n\nEsse link é como uma senha: não mande para ninguém.")
-                .setPositiveButton("OK", null)
-                .show()
-        }
-        col.addView(copiar, alto())
-        val novo = botao("Gerar link novo (desliga o antigo)", CARTAO, CINZA, 15f)
-        novo.setOnClickListener {
-            AlertDialog.Builder(this)
-                .setTitle("Gerar link novo?")
-                .setMessage("O link antigo para de funcionar e você vai ter de colar o novo no Claude.")
-                .setPositiveButton("Gerar") { _, _ -> Conector.gerarLinkNovo(this); mostrar("Link novo gerado. Copie e cole no Claude.", falar = false) }
-                .setNegativeButton("Cancelar", null)
-                .show()
-        }
-        col.addView(novo, alto())
-
-        // Diagnostico e atualizacao
-        col.addView(titulo("Diagnóstico e atualização"))
-        val ver = botao("👀  Ver diagnóstico na tela (para foto)", CARTAO, OURO, 17f)
-        ver.setOnClickListener {
-            val t = TextView(this).apply {
-                text = Registro.ultimas(30).joinToString("\n").ifEmpty { "(nada anotado ainda)" }
-                setTextColor(Color.BLACK); textSize = 15f
-                setPadding(dp(18), dp(12), dp(18), dp(12))
-                setTextIsSelectable(true)
+        // Atualizações
+        val atual = cartao(direita, "Atualizações")
+        atual.addView(rotulo("Quando sair versão nova, aparece um aviso e você aprova com um toque (ou pede ao Claude)."))
+        atual.addView(botao("⟳  Procurar agora", BOTAO, TEXTO, 16f).apply {
+            setOnClickListener {
+                mostrar("Procurando…", falar = false)
+                Thread {
+                    Atualizador.verificar(applicationContext, instalar = false) { m -> runOnUiThread { mostrar(m, falar = false); atualizarEstados() } }
+                }.start()
             }
-            AlertDialog.Builder(this)
-                .setTitle("v${BuildConfig.VERSION_CODE} · controle " + (if (Controle.ligado(this)) "LIGADO" else "DESLIGADO"))
-                .setView(ScrollView(this).apply { addView(t) })
-                .setPositiveButton("Fechar", null)
-                .show()
-        }
-        col.addView(ver, alto())
-        val diag = botao("📋  Enviar diagnóstico", CARTAO, TEXTO, 17f)
-        diag.setOnClickListener { enviarDiagnostico() }
-        col.addView(diag, alto())
-        val atualizar = botao("⟳  Procurar atualização agora", CARTAO, TEXTO, 17f)
-        atualizar.setOnClickListener {
-            mostrar("Procurando atualização…", falar = false)
-            Thread { Atualizador.verificar(applicationContext) { m -> runOnUiThread { mostrar(m, falar = false) } } }.start()
-        }
-        col.addView(atualizar, alto())
+        }, alto())
+        atual.addView(interruptor("Instalar sozinho, sem perguntar", Atualizador.sozinho(this)) {
+            Atualizador.mudarSozinho(this, it)
+        })
+
+        // Diagnóstico
+        val diag = cartao(direita, "Diagnóstico")
+        diag.addView(botao("👀  Ver o registro na tela", BOTAO, TEXTO, 16f).apply { setOnClickListener { verRegistro() } }, alto())
+        diag.addView(botao("📋  Enviar diagnóstico", BOTAO, TEXTO, 16f).apply { setOnClickListener { enviarDiagnostico() } }, alto())
 
         // Ajuda
-        col.addView(titulo("O que você pode falar"))
-        col.addView(TextView(this).apply {
+        val ajuda = cartao(direita, "O que você pode falar")
+        ajuda.addView(TextView(this).apply {
             text = Comandos.AJUDA.joinToString("\n") { "•  $it" }
-            setTextColor(CINZA); textSize = 16f
+            setTextColor(CINZA); textSize = 15f
             setLineSpacing(0f, 1.25f)
         })
+
+        atualizarEstados()
     }
 
     private fun atualizarEstados() {
+        if (!::chipControle.isInitialized) return
         val ctlOk = Controle.ligado(this)
-        estadoControle.text = if (ctlOk) "✅ Controle ligado" else "⚠️ Controle desligado: comandos de tela e atualização sem toque não funcionam"
-        botaoControle.visibility = if (ctlOk) View.GONE else View.VISIBLE
-        val instOk = packageManager.canRequestPackageInstalls()
-        estadoInstalar.text = if (instOk) "✅ Atualizações automáticas permitidas" else "⚠️ Atualizações automáticas ainda não permitidas"
-        botaoInstalar.visibility = if (instOk) View.GONE else View.VISIBLE
+        pintarChip(chipControle, "Controle", if (ctlOk) "Ligado" else "Desligado", if (ctlOk) VERDE else VERMELHO)
+        val (claudeTxt, claudeCor) = when {
+            !Conector.configurado() -> "—" to CINZA
+            Conector.online -> "Conectado" to VERDE
+            else -> "Sem internet" to CINZA
+        }
+        pintarChip(chipClaude, "Claude", claudeTxt, claudeCor)
+        val (livre, pct) = memoria()
+        pintarChip(chipMemoria, "Memória", "$pct% livre", if (pct < 15) VERMELHO else if (pct < 25) OURO else VERDE)
+        chipMemoria.tag = livre
+
+        alertaReligar.visibility = if (ctlOk) View.GONE else View.VISIBLE
+        val n = Atualizador.disponivel(this)
+        alertaAtualizar.visibility = if (n > 0) View.VISIBLE else View.GONE
+        if (n > 0) textoAtualizar.text = "Atualização v$n disponível"
+
         botaoMusica.text = "🎵  Música: " + Apps.nomeDe(this, Rotina.musica(this))
         botaoNavegacao.text = "🧭  GPS: " + Apps.nomeDe(this, Rotina.navegacao(this))
         textoVolume.text = "Volume ao ligar: ${Rotina.volume(this)}%"
+
+        // Permissões que faltam
+        permissoes.removeViews(1, (permissoes.childCount - 1).coerceAtLeast(0))
+        var falta = false
+        if (!packageManager.canRequestPackageInstalls()) {
+            falta = true
+            permissoes.addView(botao("Permitir instalar as atualizações", BOTAO, TEXTO, 16f).apply {
+                setOnClickListener {
+                    startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                }
+            }, alto())
+        }
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            falta = true
+            permissoes.addView(botao("Permitir GPS (velocidade e viagens)", BOTAO, TEXTO, 16f).apply {
+                setOnClickListener { pedirPermissoesSimples() }
+            }, alto())
+        }
+        permissoes.visibility = if (falta) View.VISIBLE else View.GONE
     }
 
-    // ---------------------------------------------------------------- acoes
+    private fun memoria(): Pair<Long, Int> {
+        val am = getSystemService(ACTIVITY_SERVICE) as ActivityManager
+        val mi = ActivityManager.MemoryInfo()
+        am.getMemoryInfo(mi)
+        val pct = if (mi.totalMem > 0) (mi.availMem * 100 / mi.totalMem).toInt() else 0
+        return (mi.availMem / (1024 * 1024)) to pct
+    }
+
+    // ---------------------------------------------------------------- ações
 
     private fun ouvir() {
         val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -333,6 +409,40 @@ class MainActivity : Activity() {
         if (falar) Voz.falar(t)
     }
 
+    private fun copiarLink() {
+        if (!Conector.configurado()) { mostrar("O conector ainda não está configurado nesta versão.", falar = false); return }
+        val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("Conector Painel ASX", Conector.linkDoClaude(this)))
+        AlertDialog.Builder(this)
+            .setTitle("Link copiado ✅")
+            .setMessage("No Claude (claude.ai): Configurações → Conectores → Adicionar conector personalizado → Nome: Painel ASX → cole o link.\n\nEsse link é como uma senha: não mande para ninguém.")
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
+    private fun gerarLinkNovo() {
+        AlertDialog.Builder(this)
+            .setTitle("Gerar link novo?")
+            .setMessage("O link antigo para de funcionar e você vai ter de colar o novo no Claude.")
+            .setPositiveButton("Gerar") { _, _ -> Conector.gerarLinkNovo(this); mostrar("Link novo gerado. Copie e cole no Claude.", falar = false) }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun verRegistro() {
+        val t = TextView(this).apply {
+            text = Registro.ultimas(40).joinToString("\n").ifEmpty { "(nada anotado ainda)" }
+            setTextColor(Color.BLACK); textSize = 14f
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+            setTextIsSelectable(true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("v${BuildConfig.VERSION_CODE} · Controle " + (if (Controle.ligado(this)) "LIGADO" else "DESLIGADO"))
+            .setView(ScrollView(this).apply { addView(t) })
+            .setPositiveButton("Fechar", null)
+            .show()
+    }
+
     private fun escolherApp(chave: String, titulo: String) {
         val apps = Apps.listar(this)
         val nomes = (listOf("— nenhum —") + apps.map { it.nome }).toTypedArray()
@@ -361,12 +471,23 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---------------------------------------------------------------- ajudantes visuais
+    // ---------------------------------------------------------------- peças visuais
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    private fun fundo(cor: Int, raio: Int) = GradientDrawable().apply {
+    private fun fundo(cor: Int, raio: Int, borda: Int? = null) = GradientDrawable().apply {
         setColor(cor); cornerRadius = dp(raio).toFloat()
+        if (borda != null) setStroke(dp(1), borda)
+    }
+
+    private fun coluna() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(22), dp(18), dp(22), dp(28))
+    }
+
+    private fun rolar(v: View) = ScrollView(this).apply {
+        isFillViewport = true
+        addView(v, ViewGroup.LayoutParams(-1, -2))
     }
 
     private fun botao(t: String, cor: Int, corTexto: Int, tam: Float) = Button(this).apply {
@@ -377,18 +498,82 @@ class MainActivity : Activity() {
         typeface = Typeface.DEFAULT_BOLD
         background = fundo(cor, 16)
         gravity = Gravity.CENTER
+        stateListAnimator = null
     }
 
-    private fun alto() = LinearLayout.LayoutParams(-1, dp(64)).apply { topMargin = dp(10) }
+    private fun alto() = LinearLayout.LayoutParams(-1, dp(58)).apply { topMargin = dp(8) }
 
-    private fun titulo(t: String) = TextView(this).apply {
+    private fun rotulo(t: String) = TextView(this).apply {
         text = t
-        setTextColor(TEXTO); textSize = 21f; typeface = Typeface.DEFAULT_BOLD
-        setPadding(0, dp(28), 0, dp(4))
+        setTextColor(CINZA); textSize = 15f
+        setPadding(0, dp(6), 0, dp(2))
     }
 
-    private fun info() = TextView(this).apply {
-        setTextColor(CINZA); textSize = 16f
-        setPadding(0, dp(10), 0, 0)
+    private fun chip() = TextView(this).apply {
+        textSize = 15f
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        setPadding(dp(10), dp(10), dp(10), dp(10))
+        background = fundo(CARTAO, 14, BORDA)
+    }
+
+    private fun pesoChip(margem: Int) = LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(margem) }
+
+    private fun pintarChip(c: TextView, nome: String, valor: String, cor: Int) {
+        val hexCor = String.format("#%06X", 0xFFFFFF and cor)
+        val hexCinza = String.format("#%06X", 0xFFFFFF and CINZA)
+        @Suppress("DEPRECATION")
+        c.text = android.text.Html.fromHtml(
+            "<font color='$hexCinza'><small>$nome</small></font><br><font color='$hexCor'>● </font><font color='#EEF2F7'>$valor</font>"
+        )
+    }
+
+    /** Cartão com título; devolve o miolo onde se colocam as coisas. */
+    private fun cartao(pai: LinearLayout, titulo: String): LinearLayout {
+        val c = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = fundo(CARTAO, 18, BORDA)
+            setPadding(dp(18), dp(14), dp(18), dp(16))
+        }
+        c.addView(TextView(this).apply {
+            text = titulo
+            setTextColor(TEXTO); textSize = 18f; typeface = Typeface.DEFAULT_BOLD
+        })
+        pai.addView(c, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
+        return c
+    }
+
+    private fun interruptor(t: String, valor: Boolean, mudou: (Boolean) -> Unit) = Switch(this).apply {
+        text = t
+        setTextColor(TEXTO); textSize = 16f
+        isChecked = valor
+        setPadding(0, dp(10), 0, dp(6))
+        setOnCheckedChangeListener { _, v -> mudou(v) }
+    }
+
+    private fun alerta(cor: Int, titulo: String, texto: String, acao: String, tituloView: TextView? = null, clique: () -> Unit): View {
+        val caixa = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = fundo(Color.argb(40, Color.red(cor), Color.green(cor), Color.blue(cor)), 16, cor)
+            setPadding(dp(16), dp(12), dp(12), dp(12))
+            visibility = View.GONE
+        }
+        val textos = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val t = tituloView ?: TextView(this)
+        t.text = titulo
+        t.setTextColor(TEXTO); t.textSize = 17f; t.typeface = Typeface.DEFAULT_BOLD
+        textos.addView(t)
+        textos.addView(TextView(this).apply { text = texto; setTextColor(CINZA); textSize = 14f })
+        caixa.addView(textos, LinearLayout.LayoutParams(0, -2, 1f))
+        caixa.addView(botao(acao, cor, if (cor == OURO) TINTA_OURO else Color.WHITE, 16f).apply {
+            setOnClickListener { clique() }
+        }, LinearLayout.LayoutParams(dp(130), dp(54)).apply { leftMargin = dp(10) })
+        val envolve = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        envolve.addView(caixa, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+        // a visibilidade e controlada no "envolve"
+        caixa.visibility = View.VISIBLE
+        envolve.visibility = View.GONE
+        return envolve
     }
 }
