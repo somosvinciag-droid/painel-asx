@@ -14,6 +14,7 @@ object Comandos {
     val AJUDA = listOf(
         "\"abre a câmera\" / \"câmera de ré\"",
         "\"abre o Spotify\", \"abre o Waze\", \"abre o rádio\"… (qualquer app pelo nome)",
+        "\"rota para Pouso Alegre\" (Waze) / \"rota para Caxambu, Pouso Alegre, Caxambu\" (Maps com paradas)",
         "\"volume 50\", \"aumenta o volume\", \"abaixa o volume\", \"silêncio\"",
         "\"próxima\", \"anterior\", \"pausa\", \"continua\"",
         "\"tela inicial\", \"voltar\"",
@@ -30,6 +31,9 @@ object Comandos {
         Registro.anotar("comando: \"$falado\"")
         if (t.isEmpty()) return "Não ouvi nada."
         val ctl = Controle.ativo
+
+        // Rota no GPS ("rota para Pouso Alegre", "rota para Caxambu, Pouso Alegre, Caxambu")
+        Rotas.destinos(falado)?.let { return Rotas.navegar(ctx, it) }
 
         // Camera de re
         if (t.contains("camera") || t.endsWith(" re") || t == "re") {
