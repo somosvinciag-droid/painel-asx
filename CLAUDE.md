@@ -35,6 +35,25 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
 - Aqui no ambiente do Claude não há Android SDK; quem compila é o GitHub Actions. Depois de cada push,
   confira a execução (`gh run list`) antes de dizer que está pronto.
 
+## Atualizações (a partir da v11)
+
+- A verificação automática (15 em 15 min, ao acordar, ao abrir) só **avisa** ("Atualização disponível").
+  Instala quando o Leonardo aprova: toque no aviso/botão do painel, ou ele pede ao Claude ("pode atualizar")
+  e o Claude chama `atualizar_app_central`. Há a opção "Instalar sozinho" (desligada por padrão).
+- Esta central **desliga a Acessibilidade (Controle) a cada atualização**. O app mostra "Controle desligado →
+  Religar" (alerta na tela e notificação) e o Leonardo religa com um toque. **Não** usar root, nem fazer um app
+  apertar sozinho o "Permitir" da Acessibilidade: isso é padrão de malware e foi descartado.
+- Por isso: juntar mudanças e publicar poucas versões. Rascunhos ficam em ramos `rascunho-*`
+  (o workflow `conferir.yml` só compila; nada vai para a central).
+- O Painel ASX está na **whitelist** do "Config. Veículo" (senão a central o fecha a cada app aberto).
+
+## Dados do carro (`LeitorCarro`)
+
+- Mapa dos apps de fábrica (strings do AndroidManifest dos pacotes `com.nwd.*`, câmera, CAN…), escuta dos avisos
+  encontrados, GPS, ré (pela tela da câmera) e `getprop`. Ferramentas: `dados_do_carro`, `mapa_da_central`.
+- Central real: NWD, Unisoc UIS8581A, **Android 10 (API 29)** apesar de dizer 13. "Car Info" em perfil genérico.
+- Leitor OBD2: suspenso pelo Leonardo (out/2026).
+
 ## Limites que já foram explicados ao Leonardo
 
 - O app só vê do carro o que a central recebe (câmera de ré, botões do volante, etc.). O ar-condicionado do ASX é mecânico.
