@@ -1,0 +1,89 @@
+package br.com.leonardo.painelasx
+
+import android.app.ActivityManager
+import android.content.Context
+import android.os.Handler
+import android.os.HandlerThread
+import android.provider.Settings
+
+/**
+ * Tarefas de fundo, de minuto em minuto, enquanto a central está ligada:
+ *  - Turbo sozinho quando a memória livre cai abaixo de 20%;
+ *  - tempo/chuva a cada 30 min;
+ *  - modo noite (faróis, se a central contar; senão pôr do sol) -> brilho da tela;
+ *  - backup na nuvem a cada 6 h;
+ *  - manda o que ficou na fila (anotações, abastecimentos) quando volta a internet.
+ */
+object Relogio {
+    private var linha: HandlerThread? = null
+    private var h: Handler? = null
+    private var appCtx: Context? = null
+    private var ultimoTurbo = 0L
+    private var ultimoBackup = 0L
+    private var noite: Boolean? = null
+    private var minuto = 0
+
+    fun iniciar(ctx: Context) {
+        if (linha != null) return
+        appCtx = ctx.applicationContext
+        val t = HandlerThread("relogio").also { it.start() }
+        linha = t
+        h = Handler(t.looper).also { it.postDelayed(tarefa, 20_000) }
+    }
+
+    private val tarefa = object : Runnable {
+        override fun run() {
+            val ctx = appCtx ?: return
+            minuto++
+            passo("memória") { memoria(ctx) }
+            passo("clima") { Clima.atualizarSePreciso(ctx) }
+            passo("noite") { modoNoite(ctx) }
+            passo("fila") { if (Conector.online) Fila.esvaziar(ctx) }
+            passo("backup") {
+                val agora = System.currentTimeMillis()
+                if (Conector.online && (if (ultimoBackup == 0L) minuto >= 10 else agora - ultimoBackup > 6 * 3600_000L)) {
+                    ultimoBackup = agora
+                    Backup.enviar(ctx)
+                }
+            }
+            h?.postDelayed(this, 60_000)
+        }
+    }
+
+    private inline fun passo(nome: String, bloco: () -> Unit) {
+        try { bloco() } catch (e: Throwable) { Registro.anotar("ERRO relógio/$nome: ${e.javaClass.simpleName}: ${e.message}") }
+    }
+
+    private fun memoria(ctx: Context) {
+        val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val mi = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        if (mi.totalMem <= 0) return
+        val pct = mi.availMem * 100 / mi.totalMem
+        val agora = System.currentTimeMillis()
+        if (pct < 20 && agora - ultimoTurbo > 10 * 60_000) {
+            ultimoTurbo = agora
+            Registro.anotar("turbo automático: memória em $pct%")
+            Turbo.limpar(ctx)
+        }
+    }
+
+    // ------------------------------------------------------------------ modo noite
+
+    fun brilhoNoite(ctx: Context) = ctx.getSharedPreferences("config", Context.MODE_PRIVATE).getInt("brilho_noite", 70)
+    fun brilhoDia(ctx: Context) = ctx.getSharedPreferences("config", Context.MODE_PRIVATE).getInt("brilho_dia", 230)
+
+    private fun modoNoite(ctx: Context) {
+        val faroes = LeitorCarro.faroisAcesos()
+        val agoraNoite = faroes ?: Clima.ehNoite()
+        if (agoraNoite == noite) return
+        noite = agoraNoite
+        Registro.anotar("modo noite: ${if (agoraNoite) "ligado" else "desligado"} (${if (faroes != null) "faróis" else "pôr do sol"})")
+        if (!Settings.System.canWrite(ctx)) return
+        try {
+            Settings.System.putInt(ctx.contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
+            Settings.System.putInt(ctx.contentResolver, Settings.System.SCREEN_BRIGHTNESS, if (agoraNoite) brilhoNoite(ctx) else brilhoDia(ctx))
+        } catch (e: Exception) {
+            Registro.anotar("modo noite: não mudou o brilho (${e.javaClass.simpleName})")
+        }
+    }
+}

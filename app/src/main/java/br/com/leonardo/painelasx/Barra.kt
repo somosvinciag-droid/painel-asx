@@ -90,13 +90,11 @@ object Barra {
             }, LinearLayout.LayoutParams(-1, dp(ctx, 120)))
             coluna.setOnClickListener { recolhida = false; esconder(ctx); mostrar(ctx) }
         } else {
-            // Painel ASX (início)
-            coluna.addView(icone(ctx, null, "Painel") {
-                ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            })
+            // Tela do carro (início)
+            coluna.addView(icone(ctx, null, "Painel") { Painel.abrir(ctx) })
             // Microfone (fala um comando)
             coluna.addView(icone(ctx, "🎤", "Falar") {
-                ctx.startActivity(Intent(ctx, MainActivity::class.java).setAction(MainActivity.ACAO_OUVIR).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                Painel.abrir(ctx, ouvir = true)
             })
             for (p in apps(ctx)) {
                 if (ctx.packageManager.getLaunchIntentForPackage(p) == null && p != "com.anthropic.claude") continue

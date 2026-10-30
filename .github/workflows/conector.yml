@@ -25,3 +25,21 @@ jobs:
         run: |
           set -o pipefail
           npx --yes wrangler@4 deploy 2>&1 | tee saida.txt
+      - name: Chaves do Jarvis (só se existirem nos segredos do GitHub)
+        working-directory: servidor
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ATLAS_MCP_URL: ${{ secrets.ATLAS_MCP_URL }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            printf '%s' "$ANTHROPIC_API_KEY" | npx --yes wrangler@4 secret put ANTHROPIC_API_KEY > /dev/null && echo "ANTHROPIC_API_KEY: ok"
+          else
+            echo "ANTHROPIC_API_KEY: não configurada (Jarvis sem conversa)"
+          fi
+          if [ -n "$ATLAS_MCP_URL" ]; then
+            printf '%s' "$ATLAS_MCP_URL" | npx --yes wrangler@4 secret put ATLAS_MCP_URL > /dev/null && echo "ATLAS_MCP_URL: ok"
+          else
+            echo "ATLAS_MCP_URL: não configurada"
+          fi

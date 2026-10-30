@@ -51,6 +51,7 @@ object LeitorCarro {
         iniciado = true
         val app = ctx.applicationContext
         appCtx = app
+        Carro.iniciar(app)
         Viagens.iniciar(app)
         Thread({
             try {
@@ -118,6 +119,15 @@ object LeitorCarro {
             primeira = false
             try { Thread.sleep(3000) } catch (_: InterruptedException) { return }
         }
+    }
+
+    /** Faróis acesos, se a central mostrar isso num ajuste interno ("illum"/"lamp"); null = não sei. */
+    @Synchronized
+    fun faroisAcesos(): Boolean? {
+        val k = propsAtuais.keys.firstOrNull { val x = it.lowercase(); x.contains("illum") || x.contains("headlamp") || x.contains("backlight.car") }
+            ?: return null
+        val v = propsAtuais[k]?.trim()?.lowercase() ?: return null
+        return when (v) { "1", "true", "on" -> true; "0", "false", "off" -> false; else -> null }
     }
 
     // ------------------------------------------------------------------ mapa da central
@@ -295,6 +305,7 @@ object LeitorCarro {
             re = agora
             reDesde = System.currentTimeMillis()
             Registro.anotar(if (agora) "carro: ré engatada (câmera abriu)" else "carro: saiu da ré")
+            try { Carro.re(agora) } catch (_: Exception) { }
         }
     }
 
@@ -311,6 +322,7 @@ object LeitorCarro {
                 .put("precisao_m", if (l.hasAccuracy()) Math.round(l.accuracy) else JSONObject.NULL)
                 .put("hora", l.time)
             try { Viagens.novaPosicao(l) } catch (_: Exception) { }
+            try { Carro.posicao(l) } catch (e: Exception) { Registro.anotar("ERRO carro: ${e.javaClass.simpleName}: ${e.message}") }
         }
         @Deprecated("Android antigo ainda chama isto")
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
@@ -322,7 +334,7 @@ object LeitorCarro {
         if (ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
         try {
             val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000L, 0f, ouvinteGps, Looper.getMainLooper())
+            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, ouvinteGps, Looper.getMainLooper())
             Registro.anotar("leitor: GPS ligado")
         } catch (e: Exception) {
             Registro.anotar("leitor: GPS não ligou (${e.javaClass.simpleName})")

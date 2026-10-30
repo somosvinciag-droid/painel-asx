@@ -45,7 +45,9 @@ object Viagens {
         if (aberta != null && !aberta.has("fim")) {
             aberta.put("fim", aberta.optLong("ultimo_ponto", aberta.optLong("inicio")))
             aberta.put("fechada_por", "central desligou")
+            aberta.remove("km_ultimo_ponto")
             calcularResumo(aberta)
+            try { Diario.somarKm(ctx, aberta.optDouble("km")) } catch (_: Exception) { }
             Registro.anotar("viagem: fechei a viagem que ficou aberta (${"%.1f".format(aberta.optDouble("km"))} km)")
             salvar()
         }
@@ -107,6 +109,13 @@ object Viagens {
             if (m / seg < 70) v.put("km", v.optDouble("km") + m / 1000.0)
         }
         anterior = l
+        // Trajeto (para o mapa do histórico): 1 ponto a cada ~300 m, no máximo 150 por viagem.
+        val traj = v.optJSONArray("trajeto") ?: JSONArray().also { v.put("trajeto", it) }
+        val ultimoKm = v.optDouble("km_ultimo_ponto", -1.0)
+        if (traj.length() < 150 && (ultimoKm < 0 || v.optDouble("km") - ultimoKm > 0.3)) {
+            traj.put(JSONArray().put(Math.round(l.latitude * 100000) / 100000.0).put(Math.round(l.longitude * 100000) / 100000.0))
+            v.put("km_ultimo_ponto", v.optDouble("km"))
+        }
         if (kmh > v.optDouble("vel_max_kmh")) v.put("vel_max_kmh", Math.round(kmh))
         v.put("ultimo_ponto", agora).put("destino", ponto(l))
 
@@ -130,11 +139,13 @@ object Viagens {
         paradoDesde = 0L
         v.put("fim", quando).put("fechada_por", motivo)
         v.remove("salvo_em")
+        v.remove("km_ultimo_ponto")
         calcularResumo(v)
         if (v.optDouble("km") < 0.3) {
             viagens.remove(v)      // manobra/estacionar: não conta como viagem
         } else {
             Registro.anotar("viagem: terminou — ${"%.1f".format(v.optDouble("km"))} km em ${v.optLong("duracao_min")} min")
+            try { Carro.fimDeViagem(v, motivo) } catch (_: Exception) { }
         }
         salvar()
     }
@@ -156,7 +167,7 @@ object Viagens {
     }
 
     @Synchronized
-    fun resumo(dias: Int): JSONObject {
+    fun resumo(dias: Int, comTrajeto: Boolean = false): JSONObject {
         val desde = System.currentTimeMillis() - dias * 24L * 3600 * 1000
         val lista = viagens.filter { it.optLong("inicio") >= desde && it.has("fim") }
         val km = lista.sumOf { it.optDouble("km") }
@@ -167,9 +178,10 @@ object Viagens {
             .put("km_total", Math.round(km * 10) / 10.0)
             .put("horas_dirigindo", Math.round(min / 6.0) / 10.0)
             .put("vel_max_kmh", lista.maxOfOrNull { it.optLong("vel_max_kmh") } ?: 0)
+            .put("nota_media", lista.filter { it.has("nota") }.map { it.optInt("nota") }.let { if (it.isEmpty()) JSONObject.NULL else it.average().toInt() })
             .put("em_andamento", ativa != null)
             .put("lista", JSONArray(lista.takeLast(40).map { v ->
-                JSONObject(v.toString()).apply { remove("ultimo_ponto"); remove("salvo_em") }
+                JSONObject(v.toString()).apply { remove("ultimo_ponto"); remove("salvo_em"); if (!comTrajeto) remove("trajeto") }
             }))
     }
 
