@@ -1,0 +1,61 @@
+name: Preparar a voz própria do Jarvis
+
+# Roda só quando pedido. Baixa o motor de voz (sherpa-onnx, Apache-2.0) e uma voz masculina
+# em português (Piper), junta tudo num .zip por tipo de processador e guarda na release "voz-1"
+# (marcada como pré-lançamento, para NÃO virar a "latest" que o Atualizador lê).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  voz:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSAO: v1.13.8
+      VOZ: vits-piper-pt_BR-faber-medium
+    steps:
+      - name: Baixar motor e voz
+        run: |
+          set -euo pipefail
+          mkdir -p w && cd w
+          gh release view "$VERSAO" -R k2-fsa/sherpa-onnx --json assets -q '.assets[].name' > motor.txt
+          cat motor.txt | grep -i android || true
+          MOTOR=$(grep -E '^sherpa-onnx-v[0-9.]+-android\.tar\.bz2$' motor.txt | head -1)
+          echo "motor: $MOTOR"
+          gh release download "$VERSAO" -R k2-fsa/sherpa-onnx -p "$MOTOR"
+          tar xjf "$MOTOR"
+          gh release view tts-models -R k2-fsa/sherpa-onnx --json assets -q '.assets[].name' | grep -i 'pt_BR' || true
+          gh release download tts-models -R k2-fsa/sherpa-onnx -p "$VOZ.tar.bz2"
+          tar xjf "$VOZ.tar.bz2"
+          find . -name '*.so' | head -40
+          ls -la "$VOZ"
+      - name: Montar os pacotes
+        run: |
+          set -euo pipefail
+          cd w
+          for ABI in arm64-v8a armeabi-v7a; do
+            D="pacote-$ABI"
+            mkdir -p "$D"
+            JNI=$(find . -path "*/$ABI/libsherpa-onnx-jni.so" | head -1)
+            ORT=$(find . -path "*/$ABI/libonnxruntime.so" | head -1)
+            test -n "$JNI" && test -n "$ORT"
+            cp "$JNI" "$ORT" "$D/"
+            cp "$VOZ"/*.onnx "$D/model.onnx"
+            cp "$VOZ/tokens.txt" "$D/"
+            cp -r "$VOZ/espeak-ng-data" "$D/"
+            echo "$VOZ $VERSAO" > "$D/versao.txt"
+            (cd "$D" && zip -qr -9 "../voz-$ABI.zip" .)
+            ls -la "voz-$ABI.zip"
+          done
+      - name: Guardar na release voz-1
+        run: |
+          set -euo pipefail
+          cd w
+          gh release delete voz-1 -R "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create voz-1 -R "$GITHUB_REPOSITORY" --prerelease --latest=false \
+            --title "Voz própria do Jarvis (pacote)" \
+            --notes "Motor sherpa-onnx $VERSAO (Apache-2.0) + voz $VOZ (Piper). Baixado uma vez pela central." \
+            voz-arm64-v8a.zip voz-armeabi-v7a.zip
