@@ -319,6 +319,7 @@ object LeitorCarro {
         if (novo == "3") {
             Registro.anotar("central: dormiu (carro desligado)")
             try { Viagens.centralDesligando() } catch (_: Exception) { }
+            Despertador.marcar(ctx)
         } else if (antes == "3") {
             Registro.anotar("central: acordou (carro ligado)")
             ignorarReAte = System.currentTimeMillis() + 45_000
