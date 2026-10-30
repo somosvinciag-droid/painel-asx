@@ -70,7 +70,7 @@ class ServicoFixo : Service() {
         Relogio.iniciar(this)
         // A central reinicia quando o carro dá a partida: se ligou há pouco, é o carro ligando.
         if (android.os.SystemClock.elapsedRealtime() < 4 * 60_000L) {
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ Jarvis.partida(this) }, 6000)
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ Jarvis.partida(this) }, 300)
         }
         try {
             registerReceiver(desligando, android.content.IntentFilter(Intent.ACTION_SHUTDOWN))

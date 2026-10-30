@@ -25,26 +25,34 @@ object Jarvis {
         if (ultimaPartida != 0L && agora - ultimaPartida < 10 * 60_000) return
         ultimaPartida = agora
         Registro.anotar("jarvis: carro ligou")
-        Rede.emSegundoPlano("partida") {
-            try { Turbo.limpar(app) } catch (_: Exception) { }
-            Rede.naTela { Painel.abrir(app) }
-            Clima.atualizar(app)
-            Thread.sleep(1500)
-            val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-            val saudacao = when { h < 12 -> "Bom dia"; h < 18 -> "Boa tarde"; else -> "Boa noite" }
-            val frase = StringBuilder("$saudacao. Bem-vindo, Leonardo.")
-            val primeiraDoDia = primeiraVezHoje(app)
-            if (primeiraDoDia && Clima.temperatura != null) {
-                frase.append(" Lá fora, ${Clima.temperatura} graus, ${Clima.descricao}.")
-                if (Clima.chanceChuva2h >= 40) frase.append(" Chance de chuva de ${Clima.chanceChuva2h} por cento.")
-            }
-            Diario.lembretesDoDia(app)?.let { frase.append(" ").append(it) }
-            val falar = frase.toString()
-            Rede.naTela {
-                Voz.falar(falar, Voz.Tipo.RESPOSTA) {
-                    if (musicaDeEntrada(app)) Musica.spotify(app, "Iron Man", "musica", "Black Sabbath")
+        val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val periodo = when { h < 12 -> "manha"; h < 18 -> "tarde"; else -> "noite" }
+        val primeiraDoDia = primeiraVezHoje(app)
+        // 1) Na hora: tela do carro + saudação já gravada (não espera a voz carregar).
+        Rede.naTela { Painel.abrir(app) }
+        val depoisDaSaudacao = {
+            Rede.emSegundoPlano("partida") {
+                // 2) Depois: tempo e lembretes (com a voz carregada), Turbo e a música.
+                Clima.atualizar(app)
+                val frase = StringBuilder()
+                if (primeiraDoDia && Clima.temperatura != null) {
+                    frase.append("Lá fora, ${Clima.temperatura} graus, ${Clima.descricao}.")
+                    if (Clima.chanceChuva2h >= 40) frase.append(" Chance de chuva de ${Clima.chanceChuva2h} por cento.")
                 }
+                Diario.lembretesDoDia(app)?.let { frase.append(" ").append(it) }
+                val tocarMusica = { if (musicaDeEntrada(app)) Musica.spotify(app, "Iron Man", "musica", "Black Sabbath") }
+                val falar = frase.toString().trim()
+                Rede.naTela { if (falar.isNotEmpty()) Voz.falar(falar, Voz.Tipo.RESPOSTA) { tocarMusica() } else tocarMusica() }
+                try { Turbo.limpar(app) } catch (_: Exception) { }
             }
+            Unit
+        }
+        if (!VozPropria.tocarSaudacao(app, periodo, depoisDaSaudacao)) {
+            val s = when (periodo) { "manha" -> "Bom dia"; "tarde" -> "Boa tarde"; else -> "Boa noite" }
+            Rede.naTela { Voz.falar("$s, Leonardo. Tudo bem? Sistemas online, às suas ordens.", Voz.Tipo.RESPOSTA) { depoisDaSaudacao() } }
+        }
+        Rede.emSegundoPlano("partida-atlas") {
+            Thread.sleep(25_000) // espera o conector dizer se a Atlas está ligada
             // Leads da Atlas no primeiro bom-dia (se o Jarvis tiver a Atlas ligada)
             if (primeiraDoDia && h < 12 && Config.jarvisAtlas) {
                 val r = perguntar(app, "Resumo matinal: em uma frase curta, quantos leads novos a Atlas recebeu ontem e hoje até agora.", "bom_dia")

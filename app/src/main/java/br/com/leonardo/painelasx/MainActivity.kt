@@ -418,7 +418,8 @@ class MainActivity : Activity() {
         pintarChip(chipMemoria, "Memória", "$pct% livre", if (pct < 15) VERMELHO else if (pct < 25) OURO else VERDE)
         chipMemoria.tag = livre
 
-        alertaReligar.visibility = if (ctlOk) View.GONE else View.VISIBLE
+        // O Controle é opcional e a central o desliga a cada partida: sem alerta (só o chip "Opcional").
+        alertaReligar.visibility = View.GONE
         val n = Atualizador.disponivel(this)
         alertaAtualizar.visibility = if (n > 0) View.VISIBLE else View.GONE
         if (n > 0) textoAtualizar.text = "Atualização v$n disponível"
