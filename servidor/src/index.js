@@ -1,4 +1,4 @@
-// Painel ASX — conector entre o Claude do Leonardo e a central do carro.
+// Painel ASX — conector entre o Claude do Leonardo e a central do carro. (publicado por conector.yml)
 //
 // Duas pontas:
 //  - /app/*        a central (app Painel ASX) manda o estado e os erros e busca comandos.

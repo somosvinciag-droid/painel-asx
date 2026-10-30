@@ -1,12 +1,16 @@
 name: Montar e publicar o app
 
-# Cada envio para o main:
-#  1. publica o conector (servidor "painel-asx") na Cloudflare do Leonardo;
-#  2. monta o APK com o endereco do conector, assina sempre com a MESMA chave
-#     e publica como versao nova. O app na central ve a versao nova e atualiza sozinho.
+# Cada envio para o main que mexa no app: monta o APK (com o endereco do conector),
+# assina sempre com a MESMA chave e publica como versao nova. A central avisa o Leonardo
+# ("Atualizacao disponivel") e instala quando ele aprova.
+# O conector (servidor/) tem workflow proprio: conector.yml.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'servidor/**'
+      - '.github/**'
+      - '**/*.md'
   workflow_dispatch:
 
 permissions:
@@ -17,42 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  conector:
-    runs-on: ubuntu-latest
-    outputs:
-      url: ${{ steps.publicar.outputs.url }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Publicar o conector na Cloudflare
-        id: publicar
-        working-directory: servidor
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::warning::Faltam os segredos CLOUDFLARE_API_TOKEN e CLOUDFLARE_ACCOUNT_ID. O conector não foi publicado."
-            exit 0
-          fi
-          npx --yes wrangler@4 deploy 2>&1 | tee saida.txt
-          URL=$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' saida.txt | head -1)
-          if [ -z "$URL" ]; then
-            SUB=$(curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
-              | grep -oE '"subdomain":"[^"]+"' | cut -d'"' -f4)
-            [ -n "$SUB" ] && URL="https://painel-asx.$SUB.workers.dev"
-          fi
-          echo "Conector: $URL"
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
-
   montar:
-    needs: conector
-    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,7 +38,7 @@ jobs:
       - name: Compilar (conferir se o codigo esta certo)
         env:
           NUMERO_VERSAO: ${{ github.run_number }}
-          SERVIDOR_URL: ${{ needs.conector.outputs.url }}
+          SERVIDOR_URL: https://painel-asx.somos-vinciag.workers.dev
         run: gradle --no-daemon compileReleaseKotlin
 
       - name: Preparar a chave de assinatura
@@ -86,13 +55,13 @@ jobs:
         env:
           NUMERO_VERSAO: ${{ github.run_number }}
           CHAVE_ARQUIVO: ${{ runner.temp }}/chave.p12
-          SERVIDOR_URL: ${{ needs.conector.outputs.url }}
+          SERVIDOR_URL: https://painel-asx.somos-vinciag.workers.dev
         run: gradle --no-daemon assembleRelease
 
       - name: Publicar a versao
         env:
           GH_TOKEN: ${{ github.token }}
-          SERVIDOR_URL: ${{ needs.conector.outputs.url }}
+          SERVIDOR_URL: https://painel-asx.somos-vinciag.workers.dev
         run: |
           cp app/build/outputs/apk/release/app-release.apk painel-asx.apk
           NOTAS="$(git log -1 --pretty=%B)
