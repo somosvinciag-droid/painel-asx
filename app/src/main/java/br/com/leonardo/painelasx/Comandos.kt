@@ -181,6 +181,13 @@ object Comandos {
             Jarvis.mudarMusicaDeEntrada(ctx, liga)
             return if (liga) "Música de entrada ligada." else "Música de entrada desligada."
         }
+        if (t.contains("voz do google") || t.contains("voz do android")) {
+            VozPropria.mudarLigada(ctx, false); Voz.reiniciar(ctx); return "Usando a voz do Android."
+        }
+        if (t.contains("voz propria") || t.contains("voz do jarvis")) {
+            VozPropria.mudarLigada(ctx, true); return "Voz própria: ${VozPropria.estado}."
+        }
+        if (t.startsWith("testa a voz") || t.startsWith("teste de voz") || t == "qual voz") return "Estou usando a ${Voz.qualVoz()}."
         if (t == "obrigado" || t == "valeu" || t == "obrigado jarvis") return "Sempre às ordens, senhor."
         if (t == "bom dia" || t == "boa tarde" || t == "boa noite") return "${t.replaceFirstChar { it.uppercase() }}, Leonardo. ${Clima.texto()}"
         return null

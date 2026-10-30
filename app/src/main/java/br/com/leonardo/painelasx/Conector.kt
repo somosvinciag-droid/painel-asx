@@ -142,6 +142,8 @@ object Conector {
         .put("clima", Clima.curto())
         .put("odometro_estimado", Diario.odometro(ctx) ?: JSONObject.NULL)
         .put("ntfy", Config.topicoNtfy(ctx))
+        .put("voz", Voz.qualVoz())
+        .put("voz_propria", VozPropria.estado)
 
     private fun executar(ctx: Context, c: JSONObject) {
         val id = c.optString("id")
@@ -182,6 +184,7 @@ object Conector {
                 "lugares" -> Lugares.lista(ctx).toString(2)
                 "backup" -> Backup.enviar(ctx)
                 "foto" -> FotoCamera.tirar(ctx, texto.ifBlank { null }).toString()
+                "reiniciar_voz" -> naTelaPrincipal { Voz.reiniciar(ctx); "Voz reiniciada." }
                 "falar" -> naTelaPrincipal { Voz.falar(texto, Voz.Tipo.IMPORTANTE); "Falei na central: \"$texto\"" }
                 "atualizar" -> {
                     val msgs = mutableListOf<String>()
