@@ -71,6 +71,7 @@ class MainActivity : Activity() {
     private lateinit var botaoNavegacao: Button
     private lateinit var textoVolume: TextView
     private lateinit var permissoes: LinearLayout
+    private lateinit var textoViagens: TextView
 
     private val relogio = Handler(Looper.getMainLooper())
     private val atualizarSinais = object : Runnable {
@@ -257,6 +258,18 @@ class MainActivity : Activity() {
         // Permissões que faltam (só aparece se faltar algo)
         permissoes = cartao(direita, "Falta liberar")
 
+        // Viagens (GPS)
+        val viag = cartao(direita, "Viagens")
+        textoViagens = TextView(this).apply {
+            setTextColor(TEXTO); textSize = 16f
+            setLineSpacing(0f, 1.3f)
+            setPadding(0, dp(6), 0, dp(4))
+        }
+        viag.addView(textoViagens)
+        viag.addView(botao("📍  Onde está o carro", BOTAO, TEXTO, 16f).apply {
+            setOnClickListener { executar("onde está o carro") }
+        }, alto())
+
         // Rotina
         val rotina = cartao(direita, "Quando o carro ligar")
         rotina.addView(interruptor("Rodar a rotina sozinho", Rotina.ligada(this)) {
@@ -346,6 +359,18 @@ class MainActivity : Activity() {
         alertaAtualizar.visibility = if (n > 0) View.VISIBLE else View.GONE
         if (n > 0) textoAtualizar.text = "Atualização v$n disponível"
 
+        try {
+            val u = Viagens.ultima()
+            val s = Viagens.resumo(7)
+            val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale("pt", "BR"))
+            textoViagens.text = (if (u != null)
+                "Última: %.1f km · %d min · máx %d km/h (%s)\n".format(
+                    u.optDouble("km"), u.optLong("duracao_min"), u.optLong("vel_max_kmh"), fmt.format(java.util.Date(u.optLong("inicio"))))
+            else "Ainda sem viagens registradas.\n") +
+                "Últimos 7 dias: ${s.optInt("viagens")} viagens · ${s.optDouble("km_total")} km · ${s.optDouble("horas_dirigindo")} h" +
+                (if (s.optBoolean("em_andamento")) "\n🟢 Viagem em andamento" else "")
+        } catch (_: Exception) {
+        }
         botaoMusica.text = "🎵  Música: " + Apps.nomeDe(this, Rotina.musica(this))
         botaoNavegacao.text = "🧭  GPS: " + Apps.nomeDe(this, Rotina.navegacao(this))
         textoVolume.text = "Volume ao ligar: ${Rotina.volume(this)}%"

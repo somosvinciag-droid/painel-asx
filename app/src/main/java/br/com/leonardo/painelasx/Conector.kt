@@ -159,6 +159,8 @@ object Conector {
                 }
                 "diagnostico" -> Diagnostico.texto(ctx)
                 "dados" -> LeitorCarro.dados(ctx).toString(2)
+                "viagens" -> Viagens.resumo(texto.toIntOrNull()?.coerceIn(1, 365) ?: 7).toString(2)
+                "onde" -> Viagens.ondeParou().toString(2)
                 "mapa" -> LeitorCarro.mapa(ctx)
                 "atualizar" -> {
                     val msgs = mutableListOf<String>()

@@ -64,6 +64,15 @@ class ServicoFixo : Service() {
         Conector.iniciar(this)
         Atualizador.agendar(this)
         LeitorCarro.iniciar(this)
+        try {
+            registerReceiver(desligando, android.content.IntentFilter(Intent.ACTION_SHUTDOWN))
+        } catch (_: Exception) {
+        }
+    }
+
+    /** A central vai desligar: fecha a viagem em andamento. */
+    private val desligando = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: android.content.Context, i: Intent) = Viagens.centralDesligando()
     }
 
     /** A cada 30 s: se o Controle estiver desligado, mostra o aviso "toque para religar". */

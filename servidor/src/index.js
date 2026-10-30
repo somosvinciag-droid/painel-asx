@@ -221,6 +221,13 @@ export class Central {
     if (nome === 'atualizar_app_central') return this.enviarComando('atualizar', '');
     if (nome === 'dados_do_carro') return this.enviarComando('dados', '');
     if (nome === 'mapa_da_central') return this.enviarComando('mapa', '');
+    if (nome === 'viagens_do_carro') return this.enviarComando('viagens', String(a.dias || 7));
+    if (nome === 'onde_esta_o_carro') {
+      const r = await this.enviarComando('onde', '');
+      if (!r.erro) return r;
+      const e = await this.ctx.storage.get('estado');
+      return { aviso: r.erro, ultimo_estado_recebido: e || null };
+    }
     return { erro: 'Ferramenta desconhecida: ' + nome };
   }
 
@@ -299,5 +306,7 @@ const FERRAMENTAS = [
   { name: 'tocar_na_tela', description: 'Toca no botão da tela da central que tem este texto (use ler_tela_central antes para ver os textos).', inputSchema: { type: 'object', properties: { texto: { type: 'string' } }, required: ['texto'], additionalProperties: true }, annotations: { readOnlyHint: false, destructiveHint: false } },
   { name: 'atualizar_app_central', description: 'Instala agora a versão mais nova do app Painel ASX na central. Use só quando o Leonardo aprovar ("pode atualizar"). Depois de atualizar, o Controle cai e ele precisa religar com um toque.', inputSchema: sem, annotations: { readOnlyHint: false, destructiveHint: false } },
   { name: 'dados_do_carro', description: 'Dados que a central recebe agora: ré engatada, GPS (velocidade km/h, posição, direção), últimos sinais internos da central (avisos de fábrica com seus valores) e propriedades internas ligadas ao carro.', inputSchema: sem, annotations: { readOnlyHint: true } },
+  { name: 'viagens_do_carro', description: 'Diário de viagens (pelo GPS da central): número de viagens, km, horas dirigindo, velocidade média/máxima, origem e destino de cada uma. Use dias=1 (hoje), 7 (semana), 30 (mês).', inputSchema: { type: 'object', properties: { dias: { type: 'number' } }, additionalProperties: true }, annotations: { readOnlyHint: true } },
+  { name: 'onde_esta_o_carro', description: 'Última posição GPS guardada pela central (onde o carro está ou onde ficou quando desligou), com hora e link do Google Maps.', inputSchema: sem, annotations: { readOnlyHint: true } },
   { name: 'mapa_da_central', description: 'Mapa dos apps de fábrica da central (NWD, câmera, CAN, rádio, ZLink): nomes dos avisos internos que cada um usa, permissões e propriedades. Serve para descobrir de onde vêm os dados do carro.', inputSchema: sem, annotations: { readOnlyHint: true } }
 ];

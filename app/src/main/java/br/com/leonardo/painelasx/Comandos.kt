@@ -21,6 +21,7 @@ object Comandos {
         "\"toca em <texto do botão>\" (aperta o botão que tem esse texto na tela)",
         "\"rotina\" (roda a rotina de quando o carro liga)",
         "\"turbo\" / \"limpar memória\" (fecha o que está parado e libera RAM)",
+        "\"quantos km rodei hoje / essa semana / esse mês\", \"onde está o carro\"",
         "\"lê a tela\" (anota os botões da tela atual no diagnóstico)"
     )
 
@@ -31,6 +32,21 @@ object Comandos {
         Registro.anotar("comando: \"$falado\"")
         if (t.isEmpty()) return "Não ouvi nada."
         val ctl = Controle.ativo
+
+        // Viagens e onde o carro está
+        if (t.contains("onde") && (t.contains("carro") || t.contains("estacionei") || t.contains("parei"))) {
+            val o = Viagens.ondeParou()
+            return if (o.has("lat")) "O carro está (ou ficou) aqui: ${o.optString("mapa")}" else o.optString("aviso")
+        }
+        if (t.contains("quantos km") || t.contains("quilometros") || t.contains("viagens")) {
+            val dias = when {
+                t.contains("hoje") -> 1
+                t.contains("mes") -> 30
+                else -> 7
+            }
+            val r = Viagens.resumo(dias)
+            return "Nos últimos $dias dia(s): ${r.optInt("viagens")} viagens, ${r.optDouble("km_total")} km, ${r.optDouble("horas_dirigindo")} h dirigindo."
+        }
 
         // Rota no GPS ("rota para Pouso Alegre", "rota para Caxambu, Pouso Alegre, Caxambu")
         Rotas.destinos(falado)?.let { return Rotas.navegar(ctx, it) }

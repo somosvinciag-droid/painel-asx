@@ -35,6 +35,8 @@ object LeitorCarro {
     private val TELAS_CAMERA = listOf("com.unisoc.reversecamera", "com.ivicar.avm")
 
     @Volatile private var iniciado = false
+    @Volatile private var appCtx: Context? = null
+    @Volatile private var ultimoModoCarro = 0L
     private val sinais = LinkedHashMap<String, JSONObject>()   // acao -> {hora, dados, vezes}
     private val ultimaAnotacao = HashMap<String, Long>()
     @Volatile private var acoesOuvidas = 0
@@ -48,6 +50,8 @@ object LeitorCarro {
         if (iniciado) return
         iniciado = true
         val app = ctx.applicationContext
+        appCtx = app
+        Viagens.iniciar(app)
         Thread({
             try {
                 val acoes = acoesDaFabrica(app)
@@ -260,10 +264,29 @@ object LeitorCarro {
         }.take(1500)
         val antes = sinais[acao]
         sinais[acao] = JSONObject().put("hora", agora).put("dados", dados).put("vezes", (antes?.optInt("vezes") ?: 0) + 1)
+        if (acao == "android.hardware.usb.action.USB_DEVICE_ATTACHED") modoCarro(dados)
         if (agora - (ultimaAnotacao[acao] ?: 0L) > 60_000) {
             ultimaAnotacao[acao] = agora
             Registro.anotar("sinal do carro: $acao ${dados.take(160)}".trim())
         }
+    }
+
+    /** Modo Carro: ligou o celular no USB -> libera memória e roda a rotina (no máximo 1x a cada 5 min). */
+    private fun modoCarro(dados: String) {
+        val ctx = appCtx ?: return
+        val agora = System.currentTimeMillis()
+        if (agora - ultimoModoCarro < 5 * 60_000) return
+        ultimoModoCarro = agora
+        val nome = Regex("mProductName=([^,]+)").find(dados)?.groupValues?.get(1) ?: "aparelho USB"
+        Registro.anotar("modo carro: $nome conectado — Turbo e rotina")
+        Thread {
+            try {
+                Thread.sleep(4000) // deixa o Android Auto/USB se acertar primeiro
+                Turbo.limpar(ctx)
+                Rotina.talvezRodar(ctx, "celular conectado")
+            } catch (_: Exception) {
+            }
+        }.start()
     }
 
     fun notarTela(pacote: String) {
@@ -287,6 +310,7 @@ object LeitorCarro {
                 .put("altitude_m", if (l.hasAltitude()) Math.round(l.altitude) else JSONObject.NULL)
                 .put("precisao_m", if (l.hasAccuracy()) Math.round(l.accuracy) else JSONObject.NULL)
                 .put("hora", l.time)
+            try { Viagens.novaPosicao(l) } catch (_: Exception) { }
         }
         @Deprecated("Android antigo ainda chama isto")
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
