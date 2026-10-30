@@ -31,9 +31,14 @@ object Voz {
         if (tts != null) return
         val app = ctx.applicationContext
         am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        tts = TextToSpeech(app) { status ->
+        VozPropria.preparar(app)
+        // Prefere a voz do Google, se estiver instalada (a central pode ter outro motor padrão).
+        val google = try { app.packageManager.getPackageInfo("com.google.android.tts", 0); true } catch (_: Exception) { false }
+        val aoIniciar = TextToSpeech.OnInitListener { status ->
+            Registro.anotar("voz do android: " + (if (status == TextToSpeech.SUCCESS) "ok" else "falhou ($status)") +
+                " · motor " + (tts?.defaultEngine ?: "?") + " · instalados: " + (tts?.engines?.joinToString { it.name } ?: "nenhum"))
             if (status == TextToSpeech.SUCCESS) {
-                val t = tts ?: return@TextToSpeech
+                val t = tts ?: return@OnInitListener
                 t.setLanguage(Locale("pt", "BR"))
                 escolherVozMasculina(t)
                 t.setPitch(0.82f)       // mais grave
@@ -48,6 +53,21 @@ object Voz {
                 fila.forEach { falar(it.first, it.second) }
             }
         }
+        tts = if (google) TextToSpeech(app, aoIniciar, "com.google.android.tts") else TextToSpeech(app, aoIniciar)
+    }
+
+    /** Reinicia a voz do Android (ex.: depois de instalar a voz do Google). */
+    fun reiniciar(ctx: Context) {
+        try { tts?.shutdown() } catch (_: Exception) { }
+        tts = null
+        pronta = false
+        iniciar(ctx)
+    }
+
+    fun qualVoz(): String = when {
+        VozPropria.pronta() -> "voz própria"
+        pronta -> "voz do Android (${tts?.defaultEngine ?: "?"})"
+        else -> "sem voz (${VozPropria.estado})"
     }
 
     private fun escolherVozMasculina(t: TextToSpeech) {
@@ -74,7 +94,7 @@ object Voz {
     /** Fala. [entao] roda quando terminar de falar. */
     fun falar(texto: String, tipo: Tipo = Tipo.RESPOSTA, entao: (() -> Unit)? = null) {
         if (texto.isBlank()) { entao?.invoke(); return }
-        if (!pronta) { pendentes.add(texto to tipo); entao?.let { android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(it, 4000) }; return }
+        if (!pronta && !VozPropria.pronta()) { pendentes.add(texto to tipo); entao?.let { android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(it, 4000) }; return }
         if (tipo == Tipo.INFO && tocandoMusica()) {
             Registro.anotar("jarvis (mudo, música tocando): $texto")
             entao?.invoke()
@@ -93,6 +113,11 @@ object Voz {
                 foco = f
             }
         } catch (_: Exception) {
+        }
+        if (VozPropria.pronta()) {
+            synchronized(depois) { depois.remove(id) }
+            VozPropria.falar(texto) { terminou(null); entao?.invoke() }
+            return
         }
         tts?.speak(texto, TextToSpeech.QUEUE_ADD, Bundle(), id)
     }
