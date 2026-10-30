@@ -76,4 +76,13 @@ object Registro {
 
     @Synchronized
     fun ultimas(n: Int): List<String> = linhas.toList().takeLast(n)
+
+    /** Grava ja (usado quando o app vai quebrar: senao a ultima linha, a do motivo, se perdia). */
+    @Synchronized
+    fun gravarAgora() {
+        try {
+            arquivo?.writeText(linhas.joinToString("\n"))
+        } catch (_: Exception) {
+        }
+    }
 }

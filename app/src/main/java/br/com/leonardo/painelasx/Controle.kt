@@ -163,19 +163,39 @@ class Controle : AccessibilityService() {
         } catch (_: Exception) {
         }
         rootInActiveWindow?.let { raizes.add(0, it) }
+        var visivelSemBotao: AccessibilityNodeInfo? = null
         for (raiz in raizes) {
             for (t in textos) {
                 val nos = raiz.findAccessibilityNodeInfosByText(t) ?: continue
-                for (n in nos) {
+                // Primeiro os que tem o texto EXATO (evita tocar em "Atualizar tudo" quando se pediu "Atualizar").
+                val ordenados = nos.sortedBy { if (it.text?.toString()?.trim().equals(t, ignoreCase = true)) 0 else 1 }
+                for (n in ordenados) {
                     var x: AccessibilityNodeInfo? = n
                     while (x != null && !x.isClickable) x = x.parent
                     if (x != null && x.isEnabled && x.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                         return true
                     }
+                    if (visivelSemBotao == null && n.isVisibleToUser) visivelSemBotao = n
                 }
             }
         }
-        return false
+        // Apps novos (Play Store, etc.) desenham botoes que nao dizem "sou clicavel":
+        // toca na posicao do texto na tela, como um dedo de verdade.
+        val alvo = visivelSemBotao ?: return false
+        return tocarNoLugar(alvo)
+    }
+
+    private fun tocarNoLugar(n: AccessibilityNodeInfo): Boolean {
+        val r = android.graphics.Rect()
+        n.getBoundsInScreen(r)
+        if (r.isEmpty) return false
+        val caminho = android.graphics.Path().apply { moveTo(r.exactCenterX(), r.exactCenterY()) }
+        val gesto = android.accessibilityservice.GestureDescription.Builder()
+            .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(caminho, 0, 60))
+            .build()
+        val ok = dispatchGesture(gesto, null, null)
+        Registro.anotar("toque na posição (${r.centerX()}, ${r.centerY()}): ${if (ok) "ok" else "falhou"}")
+        return ok
     }
 
     fun voltar() = performGlobalAction(GLOBAL_ACTION_BACK)

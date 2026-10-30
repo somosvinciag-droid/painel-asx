@@ -16,6 +16,7 @@ class App : Application() {
             try {
                 val onde = erro.stackTrace.take(4).joinToString(" < ") { "${it.fileName}:${it.lineNumber}" }
                 Registro.anotar("QUEBROU (${th.name}): ${erro.javaClass.simpleName}: ${erro.message} @ $onde")
+                Registro.gravarAgora()
             } catch (_: Throwable) {
                 Log.e("PainelASX", "falha ao anotar erro", erro)
             }
