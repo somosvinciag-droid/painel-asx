@@ -64,6 +64,7 @@ class ServicoFixo : Service() {
         Conector.iniciar(this)
         Atualizador.agendar(this)
         vigia.post(olharControle)
+        LeitorCarro.iniciar(this)
     }
 
     /** A cada 30 s: se o Controle estiver desligado, mostra o aviso "toque para religar". */

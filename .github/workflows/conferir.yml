@@ -1,0 +1,26 @@
+name: Conferir rascunho (não publica)
+
+# Ramos de rascunho: só confere se o código compila. Nada vai para a central.
+on:
+  push:
+    branches-ignore: [main]
+
+jobs:
+  conferir:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+      - name: Compilar
+        run: gradle --no-daemon compileReleaseKotlin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Conferir o servidor
+        run: node --check servidor/src/index.js

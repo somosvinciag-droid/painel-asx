@@ -219,6 +219,8 @@ export class Central {
       return this.enviarComando('tocar', String(a.texto).slice(0, 120));
     }
     if (nome === 'atualizar_app_central') return this.enviarComando('atualizar', '');
+    if (nome === 'dados_do_carro') return this.enviarComando('dados', '');
+    if (nome === 'mapa_da_central') return this.enviarComando('mapa', '');
     return { erro: 'Ferramenta desconhecida: ' + nome };
   }
 
@@ -284,7 +286,7 @@ const INSTRUCOES =
   'Fale com o Leonardo em português do Brasil, simples. A central só está online com o carro ligado e com internet; ' +
   'se estiver offline, diga isso em vez de insistir. Para descobrir onde tocar, use ler_tela_central antes de tocar_na_tela. ' +
   'O registro (registro_central, filtro "ERRO" ou "QUEBROU") mostra os erros do app para corrigir. ' +
-  'Dados do motor ainda não existem (falta o leitor OBD2). Não toque em botões de pagamento, compras ou apagar dados sem o Leonardo confirmar. ' +
+ 'Dados do motor ainda não existem (falta o leitor OBD2); use dados_do_carro e mapa_da_central para o que a central recebe. Não toque em botões de pagamento, compras ou apagar dados sem o Leonardo confirmar. ' +
   'Se uma ferramenta nova não aparecer na sua lista, chame qualquer ferramenta existente com o campo extra "acao" = nome da ferramenta nova.';
 
 const sem = { type: 'object', properties: {}, additionalProperties: true };
@@ -295,5 +297,7 @@ const FERRAMENTAS = [
   { name: 'ler_tela_central', description: 'Lê o que está na tela da central agora: textos, botões e o que dá para tocar.', inputSchema: sem, annotations: { readOnlyHint: true } },
   { name: 'comando_central', description: 'Manda um comando para a central, em português, como se o Leonardo falasse: "abre o YouTube", "câmera de ré", "volume 30", "próxima", "pausa", "tela inicial", "voltar", "rotina".', inputSchema: { type: 'object', properties: { texto: { type: 'string' } }, required: ['texto'], additionalProperties: true }, annotations: { readOnlyHint: false, destructiveHint: false } },
   { name: 'tocar_na_tela', description: 'Toca no botão da tela da central que tem este texto (use ler_tela_central antes para ver os textos).', inputSchema: { type: 'object', properties: { texto: { type: 'string' } }, required: ['texto'], additionalProperties: true }, annotations: { readOnlyHint: false, destructiveHint: false } },
-  { name: 'atualizar_app_central', description: 'Faz a central procurar e instalar agora a versão mais nova do app Painel ASX.', inputSchema: sem, annotations: { readOnlyHint: false, destructiveHint: false } }
+  { name: 'atualizar_app_central', description: 'Instala agora a versão mais nova do app Painel ASX na central. Use só quando o Leonardo aprovar ("pode atualizar"). Depois de atualizar, o Controle cai e ele precisa religar com um toque.', inputSchema: sem, annotations: { readOnlyHint: false, destructiveHint: false } },
+  { name: 'dados_do_carro', description: 'Dados que a central recebe agora: ré engatada, GPS (velocidade km/h, posição, direção), últimos sinais internos da central (avisos de fábrica com seus valores) e propriedades internas ligadas ao carro.', inputSchema: sem, annotations: { readOnlyHint: true } },
+  { name: 'mapa_da_central', description: 'Mapa dos apps de fábrica da central (NWD, câmera, CAN, rádio, ZLink): nomes dos avisos internos que cada um usa, permissões e propriedades. Serve para descobrir de onde vêm os dados do carro.', inputSchema: sem, annotations: { readOnlyHint: true } }
 ];

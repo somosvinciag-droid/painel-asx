@@ -140,6 +140,7 @@ class Controle : AccessibilityService() {
             val tela = "$pacote / $classe"
             if (tela != telaAtual && pacote != packageName) {
                 telaAtual = tela
+                LeitorCarro.notarTela(pacote)
                 Registro.anotar("tela: $tela")
             }
         }

@@ -157,6 +157,8 @@ object Conector {
                     }
                 }
                 "diagnostico" -> Diagnostico.texto(ctx)
+                "dados" -> LeitorCarro.dados(ctx).toString(2)
+                "mapa" -> LeitorCarro.mapa(ctx)
                 "atualizar" -> {
                     val msgs = mutableListOf<String>()
                     Atualizador.verificar(ctx) { msgs.add(it) }
