@@ -1,6 +1,7 @@
 package br.com.leonardo.painelasx
 
 import android.content.Context
+import android.content.Intent
 import android.view.KeyEvent
 
 /**
@@ -66,7 +67,12 @@ object Comandos {
 
         // Navegar na central (precisa da Acessibilidade)
         if (t.contains("tela inicial") || t == "inicio" || t == "casa" || t == "home") {
-            return if (ctl?.inicio() == true) "Tela inicial." else precisaAcessibilidade()
+            if (ctl?.inicio() == true) return "Tela inicial."
+            // Sem o Controle: abre a tela inicial do jeito normal do Android.
+            return try {
+                ctx.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                "Tela inicial."
+            } catch (e: Exception) { precisaAcessibilidade() }
         }
         if (t == "voltar" || t == "volta") {
             return if (ctl?.voltar() == true) "Voltei." else precisaAcessibilidade()
@@ -105,5 +111,5 @@ object Comandos {
     }
 
     private fun precisaAcessibilidade() =
-        "Para isso preciso da Acessibilidade ligada. Abra o Painel ASX e toque em Ligar controle."
+        "Para ler a tela ou tocar em botões preciso do Controle (opcional). No Painel ASX, toque em \"Ligar\"."
 }

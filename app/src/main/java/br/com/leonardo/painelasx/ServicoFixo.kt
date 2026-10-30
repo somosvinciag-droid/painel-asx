@@ -63,7 +63,6 @@ class ServicoFixo : Service() {
         Registro.anotar("servico fixo: ligado")
         Conector.iniciar(this)
         Atualizador.agendar(this)
-        vigia.post(olharControle)
         LeitorCarro.iniciar(this)
     }
 

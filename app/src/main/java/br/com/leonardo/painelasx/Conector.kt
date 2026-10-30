@@ -122,6 +122,7 @@ object Conector {
     private fun estado(ctx: Context): JSONObject = JSONObject()
         .put("versao_app", BuildConfig.VERSION_CODE)
         .put("controle_ligado", Controle.ativo != null)
+        .put("abre_apps_sozinho", android.provider.Settings.canDrawOverlays(ctx))
         .put("tela_atual", Controle.ativo?.telaAtual ?: "")
         .put("app_aberto_na_frente", MainActivity.naTela)
         .put("rotina_ligada", Rotina.ligada(ctx))

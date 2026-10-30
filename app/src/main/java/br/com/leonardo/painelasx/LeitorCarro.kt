@@ -58,6 +58,62 @@ object LeitorCarro {
             }
         }, "leitor").start()
         ligarGps(app)
+        Thread({ vigiarPropriedades() }, "leitor-props").apply { isDaemon = true }.start()
+    }
+
+    // ------------------------------------------------------------------ ajustes internos que mudam
+
+    /** Ajustes internos da central que podem mudar com o carro (ré, faróis, chave...). */
+    private val PALAVRAS_SINAL = listOf(
+        "reverse", "backcar", "back.car", "quickcar", "acc", "illum", "light", "lamp", "brake",
+        "gear", "mcu", "nwd.car", "park", "radar", "door", "speed", "steer", "key"
+    )
+    private val propsAtuais = HashMap<String, String>()
+    private val mudancas = ArrayDeque<String>()
+
+    private fun lerPropsFiltradas(): Map<String, String> {
+        val m = HashMap<String, String>()
+        try {
+            val p = ProcessBuilder("getprop").redirectErrorStream(true).start()
+            p.inputStream.bufferedReader().forEachLine { l ->
+                val i = l.indexOf("]: [")
+                if (l.startsWith("[") && i > 0) {
+                    val k = l.substring(1, i)
+                    val kl = k.lowercase()
+                    if (!kl.contains("boottime") && PALAVRAS_SINAL.any { kl.contains(it) }) {
+                        m[k] = l.substring(i + 4).trimEnd(']')
+                    }
+                }
+            }
+            p.waitFor()
+        } catch (_: Exception) {
+        }
+        return m
+    }
+
+    private fun vigiarPropriedades() {
+        var primeira = true
+        while (true) {
+            val novas = lerPropsFiltradas()
+            synchronized(this) {
+                for ((k, v) in novas) {
+                    val antes = propsAtuais[k]
+                    if (!primeira && antes != v) {
+                        val linha = "$k: ${antes ?: "(novo)"} → $v"
+                        Registro.anotar("ajuste mudou: $linha")
+                        mudancas.addLast(System.currentTimeMillis().toString() + " " + linha)
+                        while (mudancas.size > 80) mudancas.removeFirst()
+                        val kl = k.lowercase()
+                        if (kl.contains("reverse") || kl.contains("backcar")) {
+                            Registro.anotar("carro: possível mudança de ré ($k=$v)")
+                        }
+                    }
+                    propsAtuais[k] = v
+                }
+            }
+            primeira = false
+            try { Thread.sleep(3000) } catch (_: InterruptedException) { return }
+        }
     }
 
     // ------------------------------------------------------------------ mapa da central
@@ -275,6 +331,8 @@ object LeitorCarro {
             .put("tela_atual", Controle.ativo?.telaAtual ?: "")
             .put("gps", gps ?: (if (ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) "sem sinal ainda" else "sem permissão de localização"))
             .put("avisos_ouvidos", acoesOuvidas)
+            .put("ajustes_vigiados", JSONObject(propsAtuais as Map<*, *>))
+            .put("ajustes_que_mudaram", JSONArray(mudancas.toList()))
             .put("sinais_recebidos", sinaisJson)
             .put("propriedades", JSONArray(propriedades()))
     }

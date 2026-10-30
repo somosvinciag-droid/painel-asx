@@ -90,7 +90,11 @@ class MainActivity : Activity() {
         ServicoFixo.iniciar(this)
         Conector.iniciar(this)
         tratarPedido(intent)
-        pedirPermissoesSimples()
+        val p = getSharedPreferences("tela", MODE_PRIVATE)
+        if (!p.getBoolean("pediu_permissoes", false)) {
+            p.edit().putBoolean("pediu_permissoes", true).apply()
+            pedirPermissoesSimples()
+        }
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -198,8 +202,8 @@ class MainActivity : Activity() {
 
         // Alertas (só aparecem quando precisa)
         alertaReligar = alerta(
-            VERMELHO, "Controle desligado",
-            "Sem ele eu não consigo ler a tela nem tocar nos botões.", "Religar"
+            CINZA, "Controle (opcional) desligado",
+            "Só serve para eu ler a tela e tocar em botões. Abrir apps, volume, Turbo e dados funcionam sem ele.", "Ligar"
         ) { abrirAcessibilidade() }
         esquerda.addView(alertaReligar)
         textoAtualizar = TextView(this)
@@ -326,7 +330,7 @@ class MainActivity : Activity() {
     private fun atualizarEstados() {
         if (!::chipControle.isInitialized) return
         val ctlOk = Controle.ligado(this)
-        pintarChip(chipControle, "Controle", if (ctlOk) "Ligado" else "Desligado", if (ctlOk) VERDE else VERMELHO)
+        pintarChip(chipControle, "Controle", if (ctlOk) "Ligado" else "Opcional", if (ctlOk) VERDE else CINZA)
         val (claudeTxt, claudeCor) = when {
             !Conector.configurado() -> "—" to CINZA
             Conector.online -> "Conectado" to VERDE
@@ -354,6 +358,19 @@ class MainActivity : Activity() {
             permissoes.addView(botao("Permitir instalar as atualizações", BOTAO, TEXTO, 16f).apply {
                 setOnClickListener {
                     startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                }
+            }, alto())
+        }
+        if (!Settings.canDrawOverlays(this)) {
+            falta = true
+            permissoes.addView(botao("Permitir abrir apps sozinho (1 vez só)", OURO, TINTA_OURO, 16f).apply {
+                setOnClickListener {
+                    try {
+                        startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+                        mostrar("Ligue a chave \"Permitir sobreposição\" do Painel ASX e volte.", falar = false)
+                    } catch (e: Exception) {
+                        startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
+                    }
                 }
             }, alto())
         }

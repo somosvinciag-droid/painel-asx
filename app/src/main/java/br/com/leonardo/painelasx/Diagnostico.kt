@@ -23,6 +23,7 @@ object Diagnostico {
         sb.append("android: ").append(Build.VERSION.RELEASE).append(" (API ").append(Build.VERSION.SDK_INT).append(")\n")
         sb.append("firmware: ").append(Build.DISPLAY).append('\n')
         sb.append("acessibilidade: ").append(if (Controle.ligado(ctx)) "ligada" else "DESLIGADA").append('\n')
+        sb.append("abrir apps sozinho (sobrepor): ").append(if (android.provider.Settings.canDrawOverlays(ctx)) "permitido" else "NÃO permitido").append('\n')
         sb.append("instalar atualizações: ")
             .append(if (ctx.packageManager.canRequestPackageInstalls()) "permitido" else "NÃO permitido").append('\n')
         sb.append("rotina: ").append(if (Rotina.ligada(ctx)) "ligada" else "desligada")
