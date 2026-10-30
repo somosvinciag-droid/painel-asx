@@ -57,23 +57,49 @@ class Controle : AccessibilityService() {
         super.onServiceConnected()
         ativo = this
         Registro.iniciar(this)
-        Voz.iniciar(this)
-        Registro.anotar("controle ligado (v${BuildConfig.VERSION_CODE})")
-        val f = IntentFilter().apply {
-            addAction(Intent.ACTION_SCREEN_ON)
-            addAction(Intent.ACTION_USER_PRESENT)
-            addAction(Intent.ACTION_POWER_CONNECTED)
+        Registro.anotar("controle: ligando (v${BuildConfig.VERSION_CODE})")
+        // Cada parte isolada: se uma falhar, o Controle continua ligado e o erro fica anotado.
+        seguro("voz") { Voz.iniciar(this) }
+        seguro("avisos da central") {
+            val f = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+                addAction(Intent.ACTION_POWER_CONNECTED)
+            }
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(acordou, f, Context.RECEIVER_EXPORTED)
+            } else {
+                registerReceiver(acordou, f)
+            }
         }
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(acordou, f, Context.RECEIVER_EXPORTED)
-        } else {
-            registerReceiver(acordou, f)
+        seguro("agendar atualizacao") { Atualizador.agendar(this) }
+        seguro("rotina") { Rotina.talvezRodar(this, "controle ligado") }
+        Registro.anotar("controle: ligado")
+    }
+
+    private fun seguro(nome: String, bloco: () -> Unit) {
+        try {
+            bloco()
+        } catch (t: Throwable) {
+            Registro.anotar("ERRO em $nome: ${t.javaClass.simpleName}: ${t.message}")
         }
-        Atualizador.agendar(this)
-        Rotina.talvezRodar(this, "controle ligado")
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        Registro.anotar("controle: o Android desligou o controle")
+        ativo = null
+        return super.onUnbind(intent)
     }
 
     override fun onAccessibilityEvent(e: AccessibilityEvent?) {
+        try {
+            tratar(e)
+        } catch (t: Throwable) {
+            Registro.anotar("ERRO no evento: ${t.javaClass.simpleName}: ${t.message}")
+        }
+    }
+
+    private fun tratar(e: AccessibilityEvent?) {
         if (e == null) return
         val pacote = e.packageName?.toString() ?: return
 

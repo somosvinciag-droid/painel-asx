@@ -178,6 +178,21 @@ class MainActivity : Activity() {
 
         // Diagnostico e atualizacao
         col.addView(titulo("Diagnóstico e atualização"))
+        val ver = botao("👀  Ver diagnóstico na tela (para foto)", CARTAO, OURO, 17f)
+        ver.setOnClickListener {
+            val t = TextView(this).apply {
+                text = Registro.ultimas(30).joinToString("\n").ifEmpty { "(nada anotado ainda)" }
+                setTextColor(Color.BLACK); textSize = 15f
+                setPadding(dp(18), dp(12), dp(18), dp(12))
+                setTextIsSelectable(true)
+            }
+            AlertDialog.Builder(this)
+                .setTitle("v${BuildConfig.VERSION_CODE} · controle " + (if (Controle.ligado(this)) "LIGADO" else "DESLIGADO"))
+                .setView(ScrollView(this).apply { addView(t) })
+                .setPositiveButton("Fechar", null)
+                .show()
+        }
+        col.addView(ver, alto())
         val diag = botao("📋  Enviar diagnóstico", CARTAO, TEXTO, 17f)
         diag.setOnClickListener { enviarDiagnostico() }
         col.addView(diag, alto())
