@@ -57,10 +57,16 @@ object VozPropria {
                 try {
                     val a = t.generate(texto, 0, velocidade(ctx) / grave(ctx))
                     val taxa = (a.sampleRate * grave(ctx)).toInt()
-                    java.io.DataOutputStream(java.io.BufferedOutputStream(FileOutputStream(File(ctx.filesDir, "voz/saudacao_$k.pcm")))).use { o ->
+                    // Grava num arquivo temporário, força salvar no disco (a central perde energia de repente) e renomeia.
+                    val tmp = File(ctx.filesDir, "voz/saudacao_$k.tmp")
+                    val fos = FileOutputStream(tmp)
+                    java.io.DataOutputStream(java.io.BufferedOutputStream(fos)).use { o ->
                         o.writeInt(taxa)
                         for (x in a.samples) o.writeShort((x.coerceIn(-1f, 1f) * 32767).toInt())
+                        o.flush()
+                        fos.fd.sync()
                     }
+                    tmp.renameTo(File(ctx.filesDir, "voz/saudacao_$k.pcm"))
                 } catch (e: Throwable) {
                     Registro.anotar("voz própria: não gravou a saudação ($k): ${e.message}")
                 }
@@ -72,7 +78,7 @@ object VozPropria {
     /** Toca a saudação já gravada (não precisa carregar a voz). false = ainda não existe. */
     fun tocarSaudacao(ctx: Context, periodo: String, entao: () -> Unit): Boolean {
         val f = File(ctx.filesDir, "voz/saudacao_$periodo.pcm")
-        if (!f.exists() || !ligada(ctx)) return false
+        if (!f.exists() || f.length() < 2000 || !ligada(ctx)) return false
         Thread({
             try {
                 java.io.DataInputStream(java.io.BufferedInputStream(f.inputStream())).use { i ->

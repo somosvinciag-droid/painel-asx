@@ -22,7 +22,7 @@ object Jarvis {
     fun partida(ctx: Context) {
         val app = ctx.applicationContext
         val agora = SystemClock.elapsedRealtime()
-        if (ultimaPartida != 0L && agora - ultimaPartida < 10 * 60_000) return
+        if (ultimaPartida != 0L && agora - ultimaPartida < 60_000) return
         ultimaPartida = agora
         Registro.anotar("jarvis: carro ligou")
         val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
