@@ -20,7 +20,8 @@ object Voz {
 
     private var tts: TextToSpeech? = null
     private var pronta = false
-    private val pendentes = ArrayList<Pair<String, Tipo>>()
+    private class Pendente(val texto: String, val tipo: Tipo, val entao: (() -> Unit)?)
+    private val pendentes = ArrayList<Pendente>()
     private var am: AudioManager? = null
     private var foco: AudioFocusRequest? = null
     private val depois = HashMap<String, () -> Unit>()
@@ -49,8 +50,7 @@ object Voz {
                     @Deprecated("antigo") override fun onError(id: String?) { terminou(id) }
                 })
                 pronta = true
-                val fila = ArrayList(pendentes); pendentes.clear()
-                fila.forEach { falar(it.first, it.second) }
+                esvaziarPendentes()
             }
         }
         tts = if (google) TextToSpeech(app, aoIniciar, "com.google.android.tts") else TextToSpeech(app, aoIniciar)
@@ -91,10 +91,22 @@ object Voz {
 
     fun tocandoMusica() = am?.isMusicActive == true
 
+    /** Fala o que ficou esperando a voz ficar pronta (chamar na linha principal). */
+    fun esvaziarPendentes() {
+        val fila = ArrayList(pendentes); pendentes.clear()
+        fila.forEach { falar(it.texto, it.tipo, it.entao) }
+    }
+
     /** Fala. [entao] roda quando terminar de falar. */
     fun falar(texto: String, tipo: Tipo = Tipo.RESPOSTA, entao: (() -> Unit)? = null) {
         if (texto.isBlank()) { entao?.invoke(); return }
-        if (!pronta && !VozPropria.pronta()) { pendentes.add(texto to tipo); entao?.let { android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(it, 4000) }; return }
+        if (!pronta && !VozPropria.pronta()) {
+            val pd = Pendente(texto, tipo, entao)
+            pendentes.add(pd)
+            // Se em 40 s nenhuma voz ficar pronta, desiste da fala (mas segue com o que vinha depois).
+            Rede.principal.postDelayed({ if (pendentes.remove(pd)) pd.entao?.invoke() }, 40_000)
+            return
+        }
         if (tipo == Tipo.INFO && tocandoMusica()) {
             Registro.anotar("jarvis (mudo, música tocando): $texto")
             entao?.invoke()

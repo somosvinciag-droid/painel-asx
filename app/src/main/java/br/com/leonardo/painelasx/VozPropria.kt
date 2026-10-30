@@ -24,8 +24,71 @@ import java.util.zip.ZipInputStream
  */
 object VozPropria {
     private const val PACOTE = "voz-1"
-    /** < 1 deixa a voz mais grave (toca um pouco mais devagar). */
-    private const val GRAVE = 0.90f
+    private fun p(ctx: Context?) = ctx?.getSharedPreferences("config", Context.MODE_PRIVATE)
+    /** < 1 deixa a voz mais grave (toca a voz gerada um pouco mais devagar). */
+    fun grave(ctx: Context?) = p(ctx)?.getFloat("voz_grave", 0.86f) ?: 0.86f
+    /** Velocidade da fala (1 = normal). */
+    fun velocidade(ctx: Context?) = p(ctx)?.getFloat("voz_vel", 0.92f) ?: 0.92f
+
+    /** "voz mais grave", "fala mais rápido"... */
+    fun ajustar(ctx: Context, dGrave: Float, dVel: Float, padrao: Boolean = false): String {
+        val e = p(ctx)!!.edit()
+        if (padrao) e.remove("voz_grave").remove("voz_vel")
+        else e.putFloat("voz_grave", (grave(ctx) + dGrave).coerceIn(0.72f, 1.05f))
+            .putFloat("voz_vel", (velocidade(ctx) + dVel).coerceIn(0.7f, 1.35f))
+        e.commit()
+        gravarSaudacoes(ctx)
+        return if (padrao) "Voz de volta ao padrão, senhor." else "Assim está melhor, senhor?"
+    }
+
+    // ------------------------------------------------------------------ saudação já gravada (toca em 1 s na partida)
+
+    private fun saudacoes() = mapOf(
+        "manha" to "Bom dia, Leonardo. Tudo bem? Sistemas online, às suas ordens.",
+        "tarde" to "Boa tarde, Leonardo. Tudo bem? Sistemas online, às suas ordens.",
+        "noite" to "Boa noite, Leonardo. Tudo bem? Sistemas online, às suas ordens."
+    )
+
+    fun gravarSaudacoes(ctx: Context) {
+        val hh = h ?: return
+        hh.post {
+            val t = tts ?: return@post
+            for ((k, texto) in saudacoes()) {
+                try {
+                    val a = t.generate(texto, 0, velocidade(ctx) / grave(ctx))
+                    val taxa = (a.sampleRate * grave(ctx)).toInt()
+                    java.io.DataOutputStream(java.io.BufferedOutputStream(FileOutputStream(File(ctx.filesDir, "voz/saudacao_$k.pcm")))).use { o ->
+                        o.writeInt(taxa)
+                        for (x in a.samples) o.writeShort((x.coerceIn(-1f, 1f) * 32767).toInt())
+                    }
+                } catch (e: Throwable) {
+                    Registro.anotar("voz própria: não gravou a saudação ($k): ${e.message}")
+                }
+            }
+            Registro.anotar("voz própria: saudações gravadas")
+        }
+    }
+
+    /** Toca a saudação já gravada (não precisa carregar a voz). false = ainda não existe. */
+    fun tocarSaudacao(ctx: Context, periodo: String, entao: () -> Unit): Boolean {
+        val f = File(ctx.filesDir, "voz/saudacao_$periodo.pcm")
+        if (!f.exists() || !ligada(ctx)) return false
+        Thread({
+            try {
+                java.io.DataInputStream(java.io.BufferedInputStream(f.inputStream())).use { i ->
+                    val taxa = i.readInt()
+                    val n = ((f.length() - 4) / 2).toInt()
+                    val pcm = ShortArray(n) { i.readShort() }
+                    tocarPcm(pcm, taxa)
+                }
+            } catch (e: Throwable) {
+                Registro.anotar("ERRO saudação: ${e.message}")
+            } finally {
+                Rede.naTela(entao)
+            }
+        }, "saudacao").start()
+        return true
+    }
 
     @Volatile var estado = "desligada"
         private set
@@ -101,6 +164,8 @@ object VozPropria {
             tts = OfflineTts(null, cfg)
             estado = "pronta"
             Registro.anotar("voz própria: pronta (${tts?.sampleRate()} Hz)")
+            Rede.naTela { Voz.esvaziarPendentes() }
+            if (!File(dir, "saudacao_noite.pcm").exists()) gravarSaudacoes(ctx)
         } catch (e: Throwable) {
             estado = "erro: ${e.javaClass.simpleName}: ${e.message}".take(200)
             Registro.anotar("ERRO voz própria: ${e.javaClass.simpleName}: ${e.message}")
@@ -134,8 +199,9 @@ object VozPropria {
         hh.post {
             try {
                 val t = tts ?: return@post
-                val audio = t.generate(texto.replace(Regex("[*_#`]"), ""), 0, 1.0f / GRAVE * 0.98f)
-                tocar(audio.samples, (audio.sampleRate * GRAVE).toInt())
+                val g = grave(appCtx)
+                val audio = t.generate(texto.replace(Regex("[*_#`]"), ""), 0, velocidade(appCtx) / g)
+                tocar(audio.samples, (audio.sampleRate * g).toInt())
             } catch (e: Throwable) {
                 Registro.anotar("ERRO voz própria ao falar: ${e.javaClass.simpleName}: ${e.message}")
             } finally {
@@ -146,7 +212,11 @@ object VozPropria {
 
     private fun tocar(amostras: FloatArray, taxa: Int) {
         if (amostras.isEmpty()) return
-        val pcm = ShortArray(amostras.size) { i -> (amostras[i].coerceIn(-1f, 1f) * 32767).toInt().toShort() }
+        tocarPcm(ShortArray(amostras.size) { i -> (amostras[i].coerceIn(-1f, 1f) * 32767).toInt().toShort() }, taxa)
+    }
+
+    private fun tocarPcm(pcm: ShortArray, taxa: Int) {
+        if (pcm.isEmpty()) return
         val at = AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)

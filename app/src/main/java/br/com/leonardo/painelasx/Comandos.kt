@@ -59,7 +59,7 @@ object Comandos {
             Jarvis.conversar(ctx, original)
             return "Um instante."
         }
-        return "Não entendi \"$falado\"."
+        return "Desculpe, senhor, não entendi: \"$falado\"."
     }
 
     private val NUMEROS = mapOf("uma" to 1, "um" to 1, "duas" to 2, "dois" to 2, "tres" to 3, "quatro" to 4, "cinco" to 5,
@@ -181,6 +181,11 @@ object Comandos {
             Jarvis.mudarMusicaDeEntrada(ctx, liga)
             return if (liga) "Música de entrada ligada." else "Música de entrada desligada."
         }
+        if (Regex("voz (mais )?(grave|grossa)").containsMatchIn(t) && !t.contains("menos")) return VozPropria.ajustar(ctx, -0.04f, 0f)
+        if (Regex("voz (mais )?(fina|aguda)|voz menos grave").containsMatchIn(t)) return VozPropria.ajustar(ctx, 0.04f, 0f)
+        if (Regex("(fala|falar|fale|voz) (mais )?(rapido|depressa|ligeiro)").containsMatchIn(t)) return VozPropria.ajustar(ctx, 0f, 0.07f)
+        if (Regex("(fala|falar|fale|voz) (mais )?(devagar|lento|calmo)").containsMatchIn(t)) return VozPropria.ajustar(ctx, 0f, -0.07f)
+        if (t.contains("voz normal") || t.contains("voz padrao")) return VozPropria.ajustar(ctx, 0f, 0f, padrao = true)
         if (t.contains("voz do google") || t.contains("voz do android")) {
             VozPropria.mudarLigada(ctx, false); Voz.reiniciar(ctx); return "Usando a voz do Android."
         }
