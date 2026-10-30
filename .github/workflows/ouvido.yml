@@ -1,0 +1,56 @@
+name: Preparar o ouvido do "Ei, Jarvis"
+
+# Roda só quando pedido. Baixa o detector de palavra-chave (sherpa-onnx KWS, inglês, 3,3M),
+# gera o arquivo das palavras ("HEY JARVIS"...) e guarda na release "ouvido-1" (pré-lançamento).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  ouvido:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MODELO: sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Baixar e montar
+        run: |
+          set -euo pipefail
+          pip install -q sentencepiece
+          mkdir -p w && cd w
+          gh release download kws-models -R k2-fsa/sherpa-onnx -p "$MODELO.tar.bz2"
+          tar xjf "$MODELO.tar.bz2"
+          ls -la "$MODELO"
+          mkdir -p ouvido
+          pega() { ls "$MODELO"/$1-*int8.onnx 2>/dev/null | head -1 || true; }
+          for p in encoder decoder joiner; do
+            f=$(ls "$MODELO"/$p-*.int8.onnx 2>/dev/null | head -1 || true)
+            [ -z "$f" ] && f=$(ls "$MODELO"/$p-*.onnx | grep -v int8 | head -1)
+            echo "$p: $f"; cp "$f" "ouvido/$p.onnx"
+          done
+          cp "$MODELO/tokens.txt" ouvido/
+          python3 - "$MODELO/bpe.model" > ouvido/keywords.txt <<'PY'
+          import sys, sentencepiece as spm
+          sp = spm.SentencePieceProcessor(model_file=sys.argv[1])
+          for frase in ["HEY JARVIS", "OK JARVIS", "HI JARVIS", "A JARVIS", "JARVIS"]:
+              pecas = sp.encode_as_pieces(frase)
+              print(" ".join(pecas) + " @" + frase.replace(" ", "_"))
+          PY
+          cat ouvido/keywords.txt
+          echo "$MODELO" > ouvido/versao.txt
+          (cd ouvido && zip -qr -9 ../ouvido.zip .)
+          ls -la ouvido.zip
+      - name: Guardar na release ouvido-1
+        run: |
+          set -euo pipefail
+          cd w
+          gh release delete ouvido-1 -R "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create ouvido-1 -R "$GITHUB_REPOSITORY" --prerelease --latest=false \
+            --title "Ouvido do Ei, Jarvis (pacote)" \
+            --notes "Detector de palavra-chave $MODELO (sherpa-onnx, Apache-2.0). Baixado uma vez pela central." \
+            ouvido.zip
