@@ -287,6 +287,7 @@ class TelaMapa : Activity() {
         Navegacao.telaAberta = true
         iniciada = true
         ligarDesenho()
+        Navegacao.aquecer(this)
         gl?.onResume()
         h.post(ritmo); h.post(painel)
     }

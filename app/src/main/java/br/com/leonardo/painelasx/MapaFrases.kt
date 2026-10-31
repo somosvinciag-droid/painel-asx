@@ -15,6 +15,12 @@ object MapaFrases {
 
     private val ORDINAIS = listOf("", "primeira", "segunda", "terceira", "quarta", "quinta", "sexta", "sétima", "oitava", "nona", "décima")
 
+    /** Rodovia ("BR-381", "MG-158", "Rodovia Fernão Dias"). */
+    fun ehRodovia(nome: String): Boolean {
+        val n = nome.trim()
+        return SIGLA_RODOVIA.containsMatchIn(n) || n.startsWith("Rodovia", ignoreCase = true)
+    }
+
     /** "na"/"no"/"em" conforme o tipo da rua. */
     fun preposicao(nome: String): String {
         if (SIGLA_RODOVIA.containsMatchIn(nome.trim())) return "na"
@@ -61,7 +67,7 @@ object MapaFrases {
     }
 
     /** Para a voz: "MG-158" vira "MG 158" (o motor de voz lê melhor). */
-    fun paraFalar(t: String) = t.replace(Regex("([A-Z]{2,3})-(\\d)"), "$1 $2")
+    fun paraFalar(t: String) = t.replace(Regex("([A-Z]{2,3})-(\\d)"), "$1 $2").replace(" / ", " e ")
 
     /** "300 metros", "1 quilômetro", "1,5 quilômetro", "12 quilômetros". */
     fun distanciaFalada(m: Double): String {

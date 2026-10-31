@@ -54,11 +54,17 @@ object Navegacao {
         }
     }
 
+    /** Abriu o mapa: prepara a busca em segundo plano (os nomes de ~60 mil ruas). */
+    fun aquecer(ctx: Context) {
+        val d = dados(ctx) ?: return
+        linha.post { try { busca(d).aquecer() } catch (_: Throwable) { } }
+    }
+
     /** Saiu um pacote novo: na próxima vez abre o novo (sem rota em andamento). */
     fun pacoteNovo() { if (rota == null) dados = null }
 
     /** Sem rota e sem tela do mapa: solta o pacote (a memória mapeada volta para o sistema). */
-    fun talvezSoltar() { if (rota == null && !telaAberta) dados = null }
+    fun talvezSoltar() { if (rota == null && !telaAberta) { dados = null; buscaCache = null } }
 
     private fun falar(t: String) {
         Registro.anotar("mapa: $t")
@@ -139,6 +145,12 @@ object Navegacao {
         }
     }
 
+    @Volatile private var buscaCache: Pair<MapaDados, MapaBusca>? = null
+    private fun busca(d: MapaDados): MapaBusca {
+        buscaCache?.let { if (it.first === d) return it.second }
+        return MapaBusca(d).also { buscaCache = d to it }
+    }
+
     /** Destino → ponto (dm). Favorito com coordenadas; "lat,lon"; busca sem internet; Nominatim. */
     private fun acharPonto(ctx: Context, d: MapaDados, pedido: String, endereco: String): Pair<Double, Double>? {
         val fav = Lugares.achar(ctx, pedido)?.second
@@ -147,7 +159,7 @@ object Navegacao {
             return d.x(it.groupValues[2].toDouble()) to d.y(it.groupValues[1].toDouble())
         }
         val l = Carro.ultimaPosicao
-        val a = MapaBusca(d).buscar(endereco, l?.let { d.x(it.longitude) }, l?.let { d.y(it.latitude) })
+        val a = busca(d).buscar(endereco, l?.let { d.x(it.longitude) }, l?.let { d.y(it.latitude) })
         Registro.anotar("mapa: busca \"$endereco\" → ${a ?: "nada"}")
         if (a != null && !(a.tipo == "cidade" && a.nota < 60)) return a.x to a.y
         // não achou a rua sem internet: tenta o Nominatim (se houver internet); senão vai para a cidade

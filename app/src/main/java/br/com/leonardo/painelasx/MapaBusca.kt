@@ -62,7 +62,7 @@ class MapaBusca(private val d: MapaDados) {
             val mx = maxOf(a.length, b.length)
             if (mx < 4) return false
             if (Math.abs(a.length - b.length) > 1) return false
-            return levenshtein(a, b) <= (if (mx >= 7) 2 else 1)
+            return levenshtein(a, b) <= (if (mx >= 8) 2 else 1)
         }
 
         /** Nota de 0 a 100 para o nome [nome] (normalizado) contra o pedido [q] (normalizado). */
@@ -75,18 +75,25 @@ class MapaBusca(private val d: MapaDados) {
                 val tq = q.substringBefore(' '); val tn = nome.substringBefore(' ')
                 return if (tq in TIPOS && tn in TIPOS && tq != tn) 75 else 92
             }
-            var achou = 0
-            for (w in nq) if (nn.any { palavraIgual(w, it) }) achou++
-            if (achou == 0) return 0
-            val cobreQ = achou.toDouble() / nq.size
-            val cobreN = achou.toDouble() / nn.size
-            if (cobreQ < 1.0 && achou < 2) return 0
+            // palavra igual vale 1; parecida ("pena" ~ "penha") vale 0,8
+            var achou = 0.0; var palavras = 0
+            for (w in nq) {
+                if (nn.contains(w)) { achou += 1.0; palavras++ }
+                else if (nn.any { palavraIgual(w, it) }) { achou += 0.8; palavras++ }
+            }
+            if (palavras == 0) return 0
+            val cobreQ = achou / nq.size
+            val cobreN = achou / nn.size
+            if (palavras < nq.size && palavras < 2) return 0
             return (cobreQ * 55 + cobreN * 30).toInt()
         }
     }
 
     private val nomesLugares: Array<String> by lazy { Array(d.nLugares) { normalizar(d.nome(d.lugarNome(it))) } }
     private val nomesRuas: Array<String> by lazy { Array(d.nRuas) { normalizar(d.nome(d.ruaNome(it))) } }
+
+    /** Prepara os nomes (a 1ª busca fica rápida). */
+    fun aquecer() { nomesLugares.size; nomesRuas.size }
 
     private fun ehCidade(i: Int) = d.lugarTipo(i) <= 2
 
@@ -161,6 +168,7 @@ class MapaBusca(private val d: MapaDados) {
             val naCidade = cid >= 0 && d.ruaLugar(i) == cid
             val dist = if (cx != null && cy != null) Math.hypot(d.ruaX(i) - cx, d.ruaY(i) - cy) / 10.0 else 0.0
             if (cid >= 0 && !naCidade && dist > 15_000) continue
+            if (cid < 0 && dist > 30_000) continue   // sem cidade: rua até 30 km do carro
             // nota manda; depois "na cidade pedida"; depois a mais perto
             val chave = nt * 1000.0 + (if (naCidade) 500 else 0) - minOf(dist / 100.0, 499.0)
             if (chave > melhorChave) {
@@ -174,6 +182,7 @@ class MapaBusca(private val d: MapaDados) {
         for (i in 0 until d.nLugares) {
             if (nomesLugares[i] != rua) continue
             val dist = if (cx != null && cy != null) Math.hypot(d.lugarX(i) - cx, d.lugarY(i) - cy) else 0.0
+            if (!ehCidade(i) && dist > 150_000) continue   // bairro com esse nome só até 15 km
             if (dist < bd) { bd = dist; bairro = Achado(d.lugarX(i).toDouble(), d.lugarY(i).toDouble(), d.nome(d.lugarNome(i)), if (ehCidade(i)) "cidade" else "bairro", numero, 100) }
         }
         val m = melhor

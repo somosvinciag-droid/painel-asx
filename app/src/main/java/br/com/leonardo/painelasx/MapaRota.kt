@@ -303,7 +303,8 @@ class Roteador(private val d: MapaDados) {
 
 /** As manobras de uma rota (onde avisar e o quê). */
 class Manobras(private val d: MapaDados) {
-    private fun nomeVia(v: Int) = d.nome(d.viaNome(v))
+    /** Nome da via; "BR-460;MG-456" (duas rodovias juntas) vira "BR-460 / MG-456". */
+    private fun nomeVia(v: Int) = d.nome(d.viaNome(v)).replace(Regex("\\s*;\\s*"), " / ")
 
     /** Rumo de saída de [no] pela via [via] (no sentido que sai do nó), olhando ~20 m. */
     private fun rumoSaida(no: Int, via: Int): Double {
@@ -393,12 +394,14 @@ class Manobras(private val d: MapaDados) {
                 abs >= 160 -> Manobra.Tipo.RETORNO
                 abs >= 125 -> Manobra.Tipo.ACENTUADA
                 abs >= 55 -> Manobra.Tipo.VIRE
-                outrasPerto.isNotEmpty() -> {
+                // na mesma rua, quase reto: a rua só segue (não fala "mantenha-se" a cada saída lateral)
+                outrasPerto.isNotEmpty() && !(continua && abs < 20) -> {
                     r.add(Manobra(k, dist[k], if (linkOut) Manobra.Tipo.SAIDA else Manobra.Tipo.MANTENHA, lado = ladoGarfo, nome = nOut))
                     null
                 }
-                abs >= 30 -> if (linkOut) Manobra.Tipo.SAIDA else Manobra.Tipo.LEVE
-                nOut.isNotBlank() && nOut != nIn -> Manobra.Tipo.SIGA
+                abs >= 30 && !continua && outrasPerto.isEmpty() -> if (linkOut) Manobra.Tipo.SAIDA else Manobra.Tipo.LEVE
+                // "siga em frente" só ao entrar numa rodovia (nas ruas da cidade é falação)
+                abs < 30 && nOut != nIn && MapaFrases.ehRodovia(nOut) && !MapaFrases.ehRodovia(nIn) -> Manobra.Tipo.SIGA
                 else -> null
             }
             if (tipo != null) {
@@ -407,6 +410,22 @@ class Manobras(private val d: MapaDados) {
             }
         }
         r.add(Manobra(ultimo, dist[ultimo], Manobra.Tipo.CHEGADA, nome = nomes.lastOrNull() ?: ""))
+        return juntarPerto(r)
+    }
+
+    /** Duas manobras no mesmo lugar (< 25 m): fica a mais forte ("vire" ganha de "mantenha-se"/"siga"). */
+    private fun juntarPerto(l: List<Manobra>): List<Manobra> {
+        val fracas = setOf(Manobra.Tipo.MANTENHA, Manobra.Tipo.SIGA, Manobra.Tipo.LEVE, Manobra.Tipo.SAIDA)
+        val r = ArrayList<Manobra>()
+        for (m in l) {
+            val ant = r.lastOrNull()
+            if (ant != null && ant.tipo != Manobra.Tipo.SAIA && m.tipo != Manobra.Tipo.CHEGADA && m.tipo != Manobra.Tipo.PARADA &&
+                ant.tipo != Manobra.Tipo.PARADA && m.distM - ant.distM < 25) {
+                if (ant.tipo in fracas && m.tipo !in fracas) { r[r.size - 1] = m; continue }
+                if (m.tipo in fracas) continue
+            }
+            r.add(m)
+        }
         return r
     }
 }

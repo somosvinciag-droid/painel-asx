@@ -380,4 +380,10 @@ Mapa e rotas NOSSOS (OpenStreetMap), sem Google e sem internet na central. Decis
   rotatória de 4 braços, estrada só com `ref`, rua de terra, rua privada, ilha, prédio em L) → gerador → 74 testes:
   pacote, frases, curvas, mão única, rotatória 1ª/2ª/3ª saída, guia falando até chegar, saiu da rota, recalcular,
   paradas, busca; e uma grade de 62 500 cruzamentos para medir o A*.
+- **Pacote v1 (31/10)**: 35,8 MB para baixar, 75,2 MB instalado; 327 mil cruzamentos, 432 mil vias, 250 mil prédios,
+  3 860 lugares, 63 mil ruas na busca. **Caxambu quase não tem prédios no OSM** (17 na área urbana, 28 na caixa do
+  município): lá o 3D fica só com as ruas. Teste com o pacote real (`scratchpad/mapa/teste/TesteReal.kt`, fora do repo):
+  Caxambu → Poços 237,7 km/3 h 27 (A* 95 mil nós, ~0,2 s no PC), → Pouso Alegre 135,7 km/1 h 56, sem "saiu da rota"
+  falso andando a 60 km/h. Menos falação: "siga em frente" só ao entrar em rodovia, nada de "mantenha-se"/"vire
+  levemente" quando a mesma rua só segue, manobras a < 25 m juntadas (Poços: 29 manobras, ~70 falas).
 - **Dados © colaboradores do OpenStreetMap (ODbL)**: a release cita a fonte; manter a atribuição se houver tela "sobre".
