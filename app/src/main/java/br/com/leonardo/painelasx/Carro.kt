@@ -40,14 +40,16 @@ object Carro {
 
     // nota da viagem
     private var freadas = 0
-    private var segAcima = 0L
+    private var msAcima = 0L   // em milissegundos (somar dt/1000 a cada leitura perdia os 999 ms)
     private var ultimoTempo = 0L
 
     // destino
     private var destinoNome: String? = null
     private var destinoLat = 0.0
     private var destinoLon = 0.0
-    private var casaPerto = false
+    // Começa "perto": só avisa "chegando em casa" depois de ter ido a mais de 2 km.
+    // (Antes, ao SAIR de casa com o app recém-aberto, dizia "Chegando em casa" e pausava a música.)
+    private var casaPerto = true
 
     // ré
     private var volumeAntesRe = -1
@@ -73,7 +75,7 @@ object Carro {
         // ---- velocidade
         val limite = Config.limite(ctx)
         if (kmh > limite + 2) {
-            segAcima += dt / 1000
+            msAcima += dt
             abaixoDesde = 0
             if (acimaDesde == 0L) acimaDesde = agora
             if (!avisouVelocidade && agora - acimaDesde > 5000) {
@@ -171,10 +173,11 @@ object Carro {
     /** Fim de uma viagem: põe a nota e fala o resumo (só quando parou de verdade, não ao religar). */
     @Synchronized
     fun fimDeViagem(v: JSONObject, motivo: String) {
+        val segAcima = msAcima / 1000
         val nota = (100 - freadas * 8 - (segAcima / 10).toInt()).coerceIn(0, 100)
         v.put("nota", nota).put("freadas_fortes", freadas).put("seg_acima_limite", segAcima)
         freadas = 0
-        segAcima = 0
+        msAcima = 0
         if (motivo == "parou") {
             val ctx = appCtx ?: return
             val km = v.optDouble("km")

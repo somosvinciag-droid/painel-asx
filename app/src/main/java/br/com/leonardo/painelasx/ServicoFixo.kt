@@ -111,6 +111,7 @@ class ServicoFixo : Service() {
 
     override fun onDestroy() {
         vigia.removeCallbacks(olharControle)
+        try { unregisterReceiver(desligando) } catch (_: Exception) { }
         Registro.anotar("servico fixo: desligado pelo Android")
         super.onDestroy()
     }

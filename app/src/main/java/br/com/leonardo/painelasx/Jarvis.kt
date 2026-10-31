@@ -80,7 +80,10 @@ object Jarvis {
     }
 
     private fun primeiraVezHoje(ctx: Context): Boolean {
-        val hoje = System.currentTimeMillis() / (24L * 3600 * 1000)
+        // Dia no fuso da central (antes era o dia UTC: às 21h de Brasília já virava o "dia seguinte"
+        // e o bom-dia com o tempo da manhã seguinte não era dito se ele tivesse dirigido depois das 21h).
+        val agora = System.currentTimeMillis()
+        val hoje = (agora + java.util.TimeZone.getDefault().getOffset(agora)) / (24L * 3600 * 1000)
         if (prefs(ctx).getLong("ultimo_dia", -1) == hoje) return false
         prefs(ctx).edit().putLong("ultimo_dia", hoje).apply()
         return true
