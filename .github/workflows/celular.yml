@@ -19,6 +19,8 @@ concurrency:
 
 jobs:
   montar:
+    # Só publica a partir do main (nunca código de rascunho, mesmo disparado à mão).
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
