@@ -20,7 +20,7 @@ object Voz {
 
     private var tts: TextToSpeech? = null
     private var pronta = false
-    private class Pendente(val texto: String, val tipo: Tipo, val entao: (() -> Unit)?)
+    private class Pendente(val texto: String, val tipo: Tipo, val entao: (() -> Unit)?, val privado: Boolean = false)
     private val pendentes = ArrayList<Pendente>()
     private var am: AudioManager? = null
     private var foco: AudioFocusRequest? = null
@@ -95,25 +95,29 @@ object Voz {
     /** Fala o que ficou esperando a voz ficar pronta (chamar na linha principal). */
     fun esvaziarPendentes() {
         val fila = ArrayList(pendentes); pendentes.clear()
-        fila.forEach { falar(it.texto, it.tipo, it.entao) }
+        fila.forEach { falar(it.texto, it.tipo, it.entao, it.privado) }
     }
 
-    /** Fala. [entao] roda quando terminar de falar. */
-    fun falar(texto: String, tipo: Tipo = Tipo.RESPOSTA, entao: (() -> Unit)? = null) {
+    /**
+     * Fala. [entao] roda quando terminar de falar.
+     * [privado] = texto do celular (mensagens): só é falado; não aparece na tela do carro (que o Controle e o
+     * Claude podem ler) nem vai para o Registro.
+     */
+    fun falar(texto: String, tipo: Tipo = Tipo.RESPOSTA, entao: (() -> Unit)? = null, privado: Boolean = false) {
         if (texto.isBlank()) { entao?.invoke(); return }
         if (!pronta && !VozPropria.pronta()) {
-            val pd = Pendente(texto, tipo, entao)
+            val pd = Pendente(texto, tipo, entao, privado)
             pendentes.add(pd)
             // Se em 40 s nenhuma voz ficar pronta, desiste da fala (mas segue com o que vinha depois).
             Rede.principal.postDelayed({ if (pendentes.remove(pd)) pd.entao?.invoke() }, 40_000)
             return
         }
         if (tipo == Tipo.INFO && tocandoMusica()) {
-            Registro.anotar("jarvis (mudo, música tocando): $texto")
+            Registro.anotar(if (privado) "jarvis (mudo, música tocando)" else "jarvis (mudo, música tocando): $texto")
             entao?.invoke()
             return
         }
-        ultimaFala = texto
+        if (!privado) ultimaFala = texto
         val id = "j" + System.nanoTime()
         if (entao != null) synchronized(depois) { depois[id] = entao }
         try {

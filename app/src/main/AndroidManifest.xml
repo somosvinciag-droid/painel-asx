@@ -27,6 +27,8 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Fase 2 do celular (cabo USB, AOA). Não é obrigatório. -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
     <queries>
         <intent>
@@ -81,6 +83,30 @@
             android:exported="false"
             android:taskAffinity="br.com.leonardo.painelasx.carro"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
+
+        <!-- Celular pelo cabo (fase 2): tela invisível que recebe o aparelho USB e fecha na hora. -->
+        <activity
+            android:name=".CaboActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- Filtro USB do celular: DESLIGADO por padrão (o cabo fica com o Android Auto/ZLink).
+             Só é ligado pelo interruptor "Cabo USB do celular para o Painel ASX" (CaboUsb.mudarCabo). -->
+        <activity-alias
+            android:name=".CaboPeloPainel"
+            android:enabled="false"
+            android:exported="true"
+            android:targetActivity=".CaboActivity">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/celular_usb" />
+        </activity-alias>
 
         <!-- Só para ver o nome da música que está tocando (acesso às notificações). -->
         <service

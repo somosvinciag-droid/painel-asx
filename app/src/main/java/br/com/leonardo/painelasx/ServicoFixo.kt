@@ -77,6 +77,7 @@ class ServicoFixo : Service() {
             medirInicio("atualizador") { Atualizador.agendar(app) }
             medirInicio("lugares") { Lugares.iniciar(app) }
             medirInicio("leitor do carro") { LeitorCarro.iniciar(app) }
+            medirInicio("celular") { CaboCelular.iniciar(app) }
         }, "inicio").start()
         try {
             registerReceiver(desligando, android.content.IntentFilter(Intent.ACTION_SHUTDOWN))
