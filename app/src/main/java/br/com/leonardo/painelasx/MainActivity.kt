@@ -121,6 +121,11 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(codigo: Int, perms: Array<out String>, resultados: IntArray) {
         super.onRequestPermissionsResult(codigo, perms, resultados)
+        if (codigo == Ouvido.PEDIDO_MIC) {
+            if (resultados.firstOrNull() == PackageManager.PERMISSION_GRANTED) relogio.postDelayed({ ouvir() }, 400)
+            else mostrar("Sem o microfone eu não consigo ouvir, senhor.")
+            return
+        }
         LeitorCarro.ligarGps(applicationContext)
         atualizarEstados()
     }
@@ -516,6 +521,24 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------- ações
 
     private fun ouvir() {
+        if (Ouvido.ouvindo) return
+        if (!Ouvido.baixado(this) && Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).resolveActivity(packageManager) != null) {
+            ouvirPeloAndroid(); return
+        }
+        if (!Ouvido.temPermissao(this)) {
+            mostrar("Toque em Permitir para eu usar o microfone, senhor.")
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), Ouvido.PEDIDO_MIC)
+            return
+        }
+        Ouvido.ouvir(this, { etapa -> resposta.text = "Jarvis: ${etapa.lowercase()}…" }) { texto, problema ->
+            if (texto != null) {
+                resposta.text = "Ouvi: \"$texto\""
+                executar(texto)
+            } else mostrar(problema ?: "Não ouvi nada, senhor.")
+        }
+    }
+
+    private fun ouvirPeloAndroid() {
         val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pt-BR")
@@ -525,7 +548,7 @@ class MainActivity : Activity() {
             @Suppress("DEPRECATION")
             startActivityForResult(i, PEDIDO_VOZ)
         } catch (e: Exception) {
-            mostrar("A central não tem reconhecimento de voz. Instale o app \"Google\" pela Play Store.")
+            mostrar(Ouvido.explicacao())
         }
     }
 

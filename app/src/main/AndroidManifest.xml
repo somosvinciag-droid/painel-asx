@@ -20,6 +20,8 @@
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <!-- Foto da câmera (experimental), só quando o Claude pede. -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Ouvido próprio do Jarvis (botão FALAR), sem internet. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <queries>

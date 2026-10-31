@@ -33,6 +33,7 @@ object Voz {
         val app = ctx.applicationContext
         am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         VozPropria.preparar(app)
+        Ouvido.preparar(app)
         // Prefere a voz do Google, se estiver instalada (a central pode ter outro motor padrão).
         val google = try { app.packageManager.getPackageInfo("com.google.android.tts", 0); true } catch (_: Exception) { false }
         val aoIniciar = TextToSpeech.OnInitListener { status ->

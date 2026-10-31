@@ -1,0 +1,46 @@
+name: Preparar o ouvido do Jarvis (entender a fala)
+
+# Baixa o reconhecimento de fala que roda SEM internet na central:
+#  - Whisper "base" multilíngue (OpenAI, MIT) já convertido pelo sherpa-onnx (int8, ~160 MB)
+#  - Silero VAD (MIT, ~2 MB): percebe quando o Leonardo começou e parou de falar
+# e guarda os arquivos soltos na release "ouvido-2" (pré-lançamento: NUNCA vira a "latest" que o Atualizador lê).
+# Roda sozinho quando este arquivo muda, ou quando pedido.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/ouvido-fala.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  ouvido:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MODELO: sherpa-onnx-whisper-base
+    steps:
+      - name: Baixar
+        run: |
+          set -euo pipefail
+          mkdir -p w && cd w
+          gh release download asr-models -R k2-fsa/sherpa-onnx -p "$MODELO.tar.bz2"
+          gh release download asr-models -R k2-fsa/sherpa-onnx -p "silero_vad.onnx"
+          tar xjf "$MODELO.tar.bz2"
+          ls -la "$MODELO"
+          mkdir -p sai
+          cp "$MODELO"/base-encoder.int8.onnx sai/ouvido-encoder.onnx
+          cp "$MODELO"/base-decoder.int8.onnx sai/ouvido-decoder.onnx
+          cp "$MODELO"/base-tokens.txt sai/ouvido-tokens.txt
+          cp silero_vad.onnx sai/ouvido-vad.onnx
+          ls -la sai
+      - name: Guardar na release ouvido-2
+        run: |
+          set -euo pipefail
+          cd w/sai
+          gh release delete ouvido-2 -R "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create ouvido-2 -R "$GITHUB_REPOSITORY" --prerelease --latest=false \
+            --title "Ouvido do Jarvis (entender a fala, sem internet)" \
+            --notes "Whisper base multilíngue (int8, sherpa-onnx) + Silero VAD. Baixado uma vez pela central." \
+            ouvido-encoder.onnx ouvido-decoder.onnx ouvido-tokens.txt ouvido-vad.onnx
