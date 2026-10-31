@@ -117,7 +117,7 @@ class Conexao(
                     try { aoChegar(this, o) } catch (_: Exception) { }
                 }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {   // também StackOverflow/OutOfMemory (JSON aninhado, imagem enorme): fecha, não mata a linha
             fechar("leitura: ${e.javaClass.simpleName}")
         }
     }
@@ -136,7 +136,7 @@ class Conexao(
                 }
                 if (agora - ultimoRecebido > quedaMs) { fechar("sem resposta há ${quedaMs / 1000} s"); break }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             fechar("escrita: ${e.javaClass.simpleName}")
         }
     }
