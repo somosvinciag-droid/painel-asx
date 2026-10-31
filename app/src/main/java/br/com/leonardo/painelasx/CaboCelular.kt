@@ -48,6 +48,7 @@ object CaboCelular {
     fun prefs(ctx: Context) = ctx.getSharedPreferences("celular", Context.MODE_PRIVATE)
 
     /** Id aleatório desta central (gerado aqui; o celular guarda depois do "Permitir"). Fica fora do backup. */
+    @Synchronized
     fun idCentral(ctx: Context): String {
         val p = prefs(ctx)
         p.getString("id", null)?.let { return it }
@@ -114,7 +115,7 @@ object CaboCelular {
                 espera = (espera * 2).coerceAtMost(30_000)
                 continue
             }
-            espera = 5_000L
+            val inicio = SystemClock.elapsedRealtime()
             val c = Conexao(canal, 5_000, 15_000, { cx, o -> Celular.receber(ctx, cx, o) }, { cx, m -> caiu(cx, m) })
             conexao = c
             mudarEstado("conectado pela ${canal.tipo}, esperando o olá do celular")
@@ -122,7 +123,16 @@ object CaboCelular {
                 .put("id", idCentral(ctx)).put("nome", "Painel ASX do ASX").put("mensagens", Celular.lerMensagens(ctx)))
             c.rodar("celular")
             conexao = null
-            esperar(2_000)
+            if (caboPronto.get() != null) continue
+            // Conexão que cai logo (algo aceita e fecha na hora): espera cada vez mais (até 60 s),
+            // para não ficar reconectando de 2 em 2 s e enchendo o registro.
+            if (SystemClock.elapsedRealtime() - inicio < 20_000) {
+                esperar(espera)
+                espera = (espera * 2).coerceAtMost(60_000)
+            } else {
+                espera = 5_000L
+                esperar(2_000)
+            }
         }
     }
 
