@@ -36,10 +36,34 @@ object Backup {
             .put("prefs", prefs).put("arquivos", arquivos)
     }
 
-    fun enviar(ctx: Context): String {
+    /** Quando foi o último backup automático e o "resumo" (sha-256) do que foi mandado. Fora do backup. */
+    private fun envio(ctx: Context) = ctx.getSharedPreferences("backup_envio", Context.MODE_PRIVATE)
+
+    fun ultimoEnvio(ctx: Context) = envio(ctx).getLong("em", 0L)
+
+    private fun resumo(corpo: JSONObject): String {
+        val semHora = JSONObject().put("prefs", corpo.opt("prefs")).put("arquivos", corpo.opt("arquivos")).toString()
+        return java.security.MessageDigest.getInstance("SHA-256").digest(semHora.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * [automatico] (relógio, de 6 em 6 h): se nada mudou desde o último backup enviado, não manda de novo
+     * (o backup inteiro, com as viagens e o trajeto, pode passar de 200 KB). Pedido pelo Leonardo/Claude: manda sempre.
+     */
+    fun enviar(ctx: Context, automatico: Boolean = false): String {
         val corpo = montar(ctx)
+        val resumo = try { resumo(corpo) } catch (_: Exception) { "" }
+        if (automatico) {
+            envio(ctx).edit().putLong("em", System.currentTimeMillis()).apply()
+            if (resumo.isNotEmpty() && resumo == envio(ctx).getString("resumo", null)) {
+                Registro.anotar("backup: nada mudou desde o último (não mandei de novo)")
+                return "Backup já estava em dia."
+            }
+        }
         val r = Conector.enviar("/app/backup", corpo, 60_000)
         val ok = r.first == 200
+        if (ok) envio(ctx).edit().putString("resumo", resumo).putLong("em", System.currentTimeMillis()).apply()
         Registro.anotar(if (ok) "backup: enviado (${corpo.toString().length / 1024} KB)" else "backup: falhou (${r.first})")
         return if (ok) "Backup feito na nuvem." else "O backup não foi agora (sem internet?)."
     }

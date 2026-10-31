@@ -44,8 +44,8 @@ object Ouvido {
         private set
     @Volatile private var rec: OfflineRecognizer? = null
     @Volatile private var vad: Vad? = null
-    private var linha: HandlerThread? = null
-    private var h: Handler? = null
+    @Volatile private var linha: HandlerThread? = null
+    @Volatile private var h: Handler? = null
     @Volatile private var appCtx: Context? = null
 
     private fun dir(ctx: Context) = File(ctx.filesDir, "ouvido")
@@ -115,7 +115,28 @@ object Ouvido {
 
     private var conferiuQuebra = false
 
+    /** Nova tentativa de baixar (sempre este mesmo objeto: dá para cancelar a espera e tentar já, sem duplicar). */
+    private val tentarDeNovo = Runnable { appCtx?.let { baixarECarregar(it) } }
+    @Volatile private var ultimaTentativa = 0L
+
+    /**
+     * A internet voltou (conector ligou de novo, ou a central acordou com internet): se o download do ouvido
+     * estava esperando os 5 min, tenta já. Roda na linha "ouvido" (uma coisa de cada vez), então nunca baixa
+     * duas vezes ao mesmo tempo; e no máximo uma tentativa a cada 15 s, se a internet ficar caindo e voltando.
+     */
+    fun internetVoltou() {
+        val hh = h ?: return
+        if (!estado.startsWith("esperando")) return
+        if (SystemClock.elapsedRealtime() - ultimaTentativa < 15_000) return
+        hh.removeCallbacks(tentarDeNovo)
+        hh.post(tentarDeNovo)
+        Registro.anotar("ouvido: a internet voltou, tento baixar agora")
+    }
+
     private fun baixarECarregar(ctx: Context) {
+        ultimaTentativa = SystemClock.elapsedRealtime()
+        // Sai do "esperando" já: enquanto esta tentativa roda, a "internet voltou" não agenda outra.
+        if (estado.startsWith("esperando")) estado = "tentando baixar de novo"
         try {
             if (!conferiuQuebra) {
                 conferiuQuebra = true
@@ -170,7 +191,7 @@ object Ouvido {
         } catch (e: Throwable) {
             estado = "esperando a internet"
             Registro.anotar("ouvido: não baixou agora (${e.javaClass.simpleName}: ${e.message}); tento de novo em 5 min")
-            h?.postDelayed({ baixarECarregar(ctx) }, 5 * 60_000)
+            h?.let { it.removeCallbacks(tentarDeNovo); it.postDelayed(tentarDeNovo, 5 * 60_000) }
         }
     }
 
@@ -271,7 +292,7 @@ object Ouvido {
                 val n = if (p.getInt("ouvido_rebaixou_versao", 0) == BuildConfig.VERSION_CODE) p.getInt("ouvido_rebaixou", 0) else 0
                 if (n < 2) {
                     p.edit().putInt("ouvido_rebaixou", n + 1).putInt("ouvido_rebaixou_versao", BuildConfig.VERSION_CODE).commit()
-                    h?.postDelayed({ baixarECarregar(ctx) }, 30_000)
+                    h?.let { it.removeCallbacks(tentarDeNovo); it.postDelayed(tentarDeNovo, 30_000) }
                 }
             }
         }

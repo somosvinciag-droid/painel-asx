@@ -53,6 +53,7 @@ object Carro {
 
     // ré
     private var volumeAntesRe = -1
+    private var gravouAndando = 0L
 
     fun iniciar(ctx: Context) { appCtx = ctx.applicationContext }
 
@@ -69,6 +70,11 @@ object Carro {
         val agora = System.currentTimeMillis()
         val kmh = if (l.hasSpeed()) l.speed * 3.6 else 0.0
         velocidadeKmh = kmh
+        // Marca que o carro está andando (o Jarvis não sauda se o app reiniciar no meio da viagem).
+        if (kmh > 15 && agora - gravouAndando > 20_000) {
+            gravouAndando = agora
+            ctx.getSharedPreferences("config", android.content.Context.MODE_PRIVATE).edit().putLong("andando_em", agora).apply()
+        }
         val dt = if (ultimoTempo > 0) (agora - ultimoTempo).coerceIn(0, 5000) else 0
         ultimoTempo = agora
 
@@ -142,7 +148,7 @@ object Carro {
     }
 
     private fun chegandoEmCasa(ctx: Context) {
-        val r = Viagens.resumo(1)
+        val r = Viagens.resumo(1, comLista = false)
         Rede.naTela {
             Rotina.teclaMidia(ctx, KeyEvent.KEYCODE_MEDIA_PAUSE)
             Painel.abrir(ctx)
@@ -181,7 +187,7 @@ object Carro {
         if (motivo == "parou") {
             val ctx = appCtx ?: return
             val km = v.optDouble("km")
-            val hoje = Viagens.resumo(1).optDouble("km_total")
+            val hoje = Viagens.resumo(1, comLista = false).optDouble("km_total")
             avisar("Viagem encerrada: ${"%.1f".format(km)} quilômetros, nota $nota. Hoje: ${"%.0f".format(hoje)} quilômetros.", Voz.Tipo.INFO)
             Diario.somarKm(ctx, km)
         } else {

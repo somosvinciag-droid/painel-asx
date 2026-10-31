@@ -188,6 +188,8 @@ object Comandos {
             Jarvis.mudarMusicaDeEntrada(ctx, liga)
             return if (liga) "Música de entrada ligada." else "Música de entrada desligada."
         }
+        if (Regex("(voz|fala|fale|falar) (mais )?(alta|alto)|aumenta (a voz|o volume da voz)").containsMatchIn(t) && !t.contains("menos")) return VozPropria.mudarVolume(ctx, 0.4f)
+        if (Regex("(voz|fala|fale|falar) (mais )?(baixa|baixo)|abaixa (a voz|o volume da voz)").containsMatchIn(t)) return VozPropria.mudarVolume(ctx, -0.4f)
         if (Regex("voz (mais )?(grave|grossa)").containsMatchIn(t) && !t.contains("menos")) return VozPropria.ajustar(ctx, -0.04f, 0f)
         if (Regex("voz (mais )?(fina|aguda)|voz menos grave").containsMatchIn(t)) return VozPropria.ajustar(ctx, 0.04f, 0f)
         if (Regex("(fala|falar|fale|voz) (mais )?(rapido|depressa|ligeiro)").containsMatchIn(t)) return VozPropria.ajustar(ctx, 0f, 0.07f)
@@ -230,7 +232,7 @@ object Comandos {
     }
 
     private fun resumo(dias: Int): String {
-        val r = Viagens.resumo(dias)
+        val r = Viagens.resumo(dias, comLista = false)
         val periodo = when (dias) { 1 -> "Hoje"; 7 -> "Nos últimos 7 dias"; else -> "Nos últimos $dias dias" }
         return "$periodo: ${r.optInt("viagens")} viagens, ${r.optDouble("km_total")} quilômetros, ${r.optDouble("horas_dirigindo")} horas dirigindo" +
             (if (!r.isNull("nota_media")) ", nota média ${r.optInt("nota_media")}." else ".")
@@ -249,7 +251,7 @@ object Comandos {
                 t.contains("mes") -> 30
                 else -> 7
             }
-            val r = Viagens.resumo(dias)
+            val r = Viagens.resumo(dias, comLista = false)
             return "Nos últimos $dias dia(s): ${r.optInt("viagens")} viagens, ${r.optDouble("km_total")} km, ${r.optDouble("horas_dirigindo")} h dirigindo."
         }
 

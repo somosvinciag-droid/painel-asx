@@ -85,7 +85,7 @@ object Atualizador {
     fun verificar(ctx: Context, instalar: Boolean = true, aviso: (String) -> Unit) {
         if (!ocupado.compareAndSet(false, true)) { aviso("Já estou verificando."); return }
         try {
-            val json = ultimaVersao() ?: run { aviso("Não consegui falar com o GitHub."); return }
+            val json = ultimaVersao(ctx) ?: run { aviso("Não consegui falar com o GitHub."); return }
             val tag = json.optString("tag_name")
             val numero = tag.filter { it.isDigit() }.toIntOrNull() ?: 0
             if (numero <= BuildConfig.VERSION_CODE) {
@@ -133,7 +133,12 @@ object Atualizador {
      * Pergunta ao GitHub a última versão. Tenta 3 vezes: com a internet do celular por Bluetooth a conexão
      * às vezes cai antes da resposta ("unexpected end of stream"), e na segunda tentativa costuma dar certo.
      */
-    private fun ultimaVersao(): JSONObject? {
+    private fun ultimaVersao(ctx: Context): JSONObject? {
+        // Pergunta "mudou desde a última vez?" (ETag): se não mudou, o GitHub responde 304 sem o conteúdo
+        // e usamos a resposta guardada. A pergunta de 15 em 15 min fica menor e não gasta o limite do GitHub.
+        val cache = ctx.getSharedPreferences("atualizacao_cache", Context.MODE_PRIVATE)
+        val etag = cache.getString("etag", null)
+        val guardada = cache.getString("json", null)
         var erro: Exception? = null
         for (t in 1..3) {
             val c = URL("https://api.github.com/repos/${BuildConfig.REPO}/releases/latest").openConnection() as HttpURLConnection
@@ -142,9 +147,18 @@ object Atualizador {
                 c.readTimeout = 15000
                 c.setRequestProperty("Accept", "application/vnd.github+json")
                 c.setRequestProperty("User-Agent", "painel-asx")
+                if (etag != null && guardada != null) c.setRequestProperty("If-None-Match", etag)
                 val code = c.responseCode
+                if (code == 304 && guardada != null) {
+                    try { return JSONObject(guardada) } catch (_: Exception) { cache.edit().clear().apply(); return null }
+                }
                 if (code != 200) { Registro.anotar("atualizacao: GitHub respondeu $code"); return null }
-                return JSONObject(c.inputStream.bufferedReader().readText())
+                val texto = c.inputStream.bufferedReader().readText()
+                val json = JSONObject(texto)
+                val novaEtag = c.getHeaderField("ETag")
+                if (novaEtag != null) cache.edit().putString("etag", novaEtag).putString("json", texto).apply()
+                else cache.edit().clear().apply()
+                return json
             } catch (e: java.io.IOException) {
                 erro = e
                 if (t < 3) Thread.sleep(3000L * t)

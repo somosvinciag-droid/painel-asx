@@ -24,17 +24,7 @@ object Despertador {
     private const val JOB = 4812
 
     /** Estado da central ("3" = dormindo). Lê direto (rápido); se o Android não deixar, pergunta ao getprop. */
-    fun estadoMcu(): String = try {
-        val c = Class.forName("android.os.SystemProperties")
-        (c.getMethod("get", String::class.java).invoke(null, "sys.nwd.mcu.state") as? String)?.trim() ?: estadoMcuGetprop()
-    } catch (_: Throwable) { estadoMcuGetprop() }
-
-    private fun estadoMcuGetprop(): String = try {
-        val p = ProcessBuilder("getprop", "sys.nwd.mcu.state").redirectErrorStream(true).start()
-        val t = p.inputStream.bufferedReader().readText().trim()
-        p.waitFor()
-        t
-    } catch (_: Exception) { "" }
+    fun estadoMcu(): String = Props.ler("sys.nwd.mcu.state")
 
     /** Chamado quando a central vai dormir. */
     fun marcar(ctx: Context) {
@@ -88,6 +78,7 @@ class AcordaJob : JobService() {
     override fun onStartJob(params: JobParameters?): Boolean {
         Registro.iniciar(this)
         Despertador.talvezAcordou(this, "internet voltou")
+        try { Ouvido.internetVoltou() } catch (_: Exception) { }
         return false
     }
 

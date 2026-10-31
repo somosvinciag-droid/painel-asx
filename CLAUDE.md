@@ -139,4 +139,27 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
   linha principal; o registro mede cada etapa ("inicio: … ms", "jarvis: carro ligou (X ms…)").
 - Ouvido pré-carrega só depois da saudação e >= 20 s do início. Partida sem "Iron Man" (`musica_entrada_v2`, padrão desligado).
 - `Partida.kt`: "--- abriu na partida ---" no diagnóstico (UsageStats; o Leonardo liga "Acesso ao uso" uma vez).
-- Pendente (decisão do Leonardo): saudar de novo depois de uma soneca curta (< 2 min) da central — hoje sauda.
+- Decidido pelo Leonardo: desligar e ligar rápido (soneca curta) continua saudando.
+
+## v23: revisão 3 e meio da viagem
+
+- `Corretor` não troca frase que perderia uma palavra real ("troquei o pneu" não vira óleo; "mais baixo" não vira rápido).
+- Ouvido tenta baixar de novo assim que a internet volta (conector/despertador), no máximo 1 vez a cada 15 s.
+- Meio da viagem (pedido do Leonardo): `Carro` grava `andando_em` (>15 km/h, a cada 20 s); `Jarvis.noMeioDaViagem` —
+  andando agora, ou andou há < 3 min sem boot/sono depois — impede saudar e abrir a tela do carro por cima do Waze.
+
+## v23 (rodada 4): otimizações
+- Conector: relatório só quando o estado muda (fora `hora_central`) ou há linhas novas; senão de 5 em 5 min.
+  Corpos > 1 KB vão com gzip depois de o relatório responder `gzip: true` (servidor: `descomprimir`). Servidor
+  novo aceita com e sem gzip; o app volta a mandar sem gzip se receber 400/415/500.
+- Backup automático: hora guardada em prefs `backup_envio` (fora do backup) e não manda se o sha-256 não mudou.
+- Atualizador: ETag em prefs `atualizacao_cache` (304 = usa a resposta guardada).
+- `Props` (Nwd.kt): SystemProperties direto, com volta para o getprop. O leitor só lê direto depois de conferir
+  que dá igual ao getprop; getprop completo 1 vez por minuto. Lista de avisos de fábrica em `acoes_fabrica.txt`.
+- Música: `MediaController.Callback` (a capa só chega quando muda). Viagens: texto das viagens fechadas guardado
+  durante a viagem. `Viagens.resumo(comLista = false)` para telas e frases.
+
+## v23: volume da voz
+- O Leonardo achou a voz baixa "mesmo aumentando o som". A voz própria agora toca pelo canal da MÚSICA (USAGE_MEDIA,
+  segue o botão de volume; antes era navegação) e é reforçada (`VozPropria.reforcar`: ganho `voz_volume`, padrão 1,6,
+  até 3, nunca passa de 95% do pico). Comandos: "voz mais alta" / "voz mais baixa" (±0,4).

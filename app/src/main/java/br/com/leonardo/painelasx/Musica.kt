@@ -7,6 +7,7 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.MediaMetadata
 import android.media.MediaPlayer
+import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.provider.MediaStore
@@ -154,14 +155,54 @@ object Musica {
     /** O que está tocando, com capa e tempo (para a tela do carro F3). */
     data class Tocando(val titulo: String, val artista: String, val capa: android.graphics.Bitmap?, val posicaoMs: Long, val duracaoMs: Long, val tocando: Boolean, val fonte: String)
 
+    // ---- sessão de mídia acompanhada: os dados da música (com a capa) só vêm quando mudam.
+    // Antes, a tela do carro pedia a cada 2 s os dados completos ao Android, e cada pedido copiava a capa
+    // inteira (uma imagem de centenas de KB) de outro app para o nosso: memória e processador à toa.
+    private val travaSessao = Any()
+    private var sessao: MediaController? = null
+    @Volatile private var meta: MediaMetadata? = null
+    private var metaLidaEm = 0L
+    private val avisosSessao = object : MediaController.Callback() {
+        override fun onMetadataChanged(m: MediaMetadata?) { meta = m }
+        override fun onSessionDestroyed() { synchronized(travaSessao) { soltarSessao() } }
+    }
+
+    private fun soltarSessao() {
+        try { sessao?.unregisterCallback(avisosSessao) } catch (_: Exception) { }
+        sessao = null
+        meta = null
+    }
+
+    /** A sessão que está tocando (ou a primeira) e os dados guardados dela. */
+    private fun sessaoAtual(ctx: Context): Pair<MediaController, MediaMetadata?>? {
+        val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
+        val sessoes = msm.getActiveSessions(ComponentName(ctx, Ouvinte::class.java))
+        val s = sessoes.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: sessoes.firstOrNull()
+        synchronized(travaSessao) {
+            if (s == null) { soltarSessao(); return null }
+            val agora = android.os.SystemClock.elapsedRealtime()
+            val atual = sessao
+            if (atual == null || atual.sessionToken != s.sessionToken) {
+                soltarSessao()
+                sessao = s
+                meta = s.metadata
+                metaLidaEm = agora
+                try { s.registerCallback(avisosSessao, Rede.principal) } catch (_: Exception) { }
+            } else if (agora - metaLidaEm > 60_000) {
+                // Reserva: se algum aviso de "música mudou" se perder, no máximo 1 min depois a tela se acerta.
+                meta = atual.metadata
+                metaLidaEm = agora
+            }
+            return sessao!! to meta
+        }
+    }
+
     fun tocando(ctx: Context): Tocando? {
         radioTocando?.let { return Tocando(it, "Rádio online", null, 0, 0, true, "RÁDIO") }
         if (!podeVerMusica(ctx)) return null
         return try {
-            val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
-            val sessoes = msm.getActiveSessions(ComponentName(ctx, Ouvinte::class.java))
-            val s = sessoes.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: sessoes.firstOrNull() ?: return null
-            val m = s.metadata ?: return null
+            val (s, m) = sessaoAtual(ctx) ?: return null
+            if (m == null) return null
             val titulo = m.getString(MediaMetadata.METADATA_KEY_TITLE) ?: return null
             val artista = m.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""
             val capa = m.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: m.getBitmap(MediaMetadata.METADATA_KEY_ART)
@@ -187,10 +228,7 @@ object Musica {
         radioTocando?.let { return "📻 $it" }
         if (!podeVerMusica(ctx)) return null
         return try {
-            val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
-            val sessoes = msm.getActiveSessions(ComponentName(ctx, Ouvinte::class.java))
-            val s = sessoes.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: sessoes.firstOrNull() ?: return null
-            val m = s.metadata ?: return null
+            val m = sessaoAtual(ctx)?.second ?: return null
             val titulo = m.getString(MediaMetadata.METADATA_KEY_TITLE) ?: return null
             val artista = m.getString(MediaMetadata.METADATA_KEY_ARTIST)
             if (artista.isNullOrBlank()) titulo else "$titulo — $artista"

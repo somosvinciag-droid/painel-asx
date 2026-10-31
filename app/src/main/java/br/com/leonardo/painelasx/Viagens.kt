@@ -76,10 +76,37 @@ object Viagens {
     private var ultimaVersao = 0L          // só muda dentro dos métodos @Synchronized
     @Volatile private var versaoGravada = 0L
 
+    // Texto das viagens JÁ FECHADAS, guardado durante uma viagem: "[{...},{...}" (sem o "]").
+    // Antes, a cada 30 s de estrada, o histórico inteiro (até 300 viagens com trajeto, centenas de KB) virava
+    // texto de novo na linha principal (o GPS chega nela). Agora só a viagem em andamento vira texto.
+    // As viagens fechadas não mudam enquanto outra está em andamento (a nota é posta no fim, com "ativa" já vazia).
+    private var prefixo: String? = null
+    private var prefixoQtd = -1
+    private var prefixoPrimeira: JSONObject? = null
+    private var prefixoUltima: JSONObject? = null
+
+    /** O mesmo texto de JSONArray(lista).toString(), reaproveitando as viagens fechadas. Chamar com a trava. */
+    private fun textoParaGravar(): String {
+        val lista = viagens.takeLast(MAX_VIAGENS)
+        val a = ativa
+        if (a == null || lista.lastOrNull() !== a) {
+            prefixo = null; prefixoQtd = -1; prefixoPrimeira = null; prefixoUltima = null
+            return JSONArray(lista).toString()
+        }
+        val fechadas = lista.size - 1
+        if (fechadas == 0) return "[" + a.toString() + "]"
+        val primeira = lista[0]; val ultima = lista[fechadas - 1]
+        val p = prefixo?.takeIf { prefixoQtd == fechadas && prefixoPrimeira === primeira && prefixoUltima === ultima }
+            ?: JSONArray(lista.subList(0, fechadas)).toString().dropLast(1).also {
+                prefixo = it; prefixoQtd = fechadas; prefixoPrimeira = primeira; prefixoUltima = ultima
+            }
+        return p + "," + a.toString() + "]"
+    }
+
     /** [agora] = grava já, nesta linha (fim de viagem: a central pode fechar o app logo depois de dormir). */
     private fun salvar(agora: Boolean = false) {
         val f = arquivo ?: return
-        val texto = try { JSONArray(viagens.takeLast(MAX_VIAGENS)).toString() } catch (_: Exception) { return }
+        val texto = try { textoParaGravar() } catch (_: Exception) { return }
         val numero = ++ultimaVersao
         val gravar = Runnable {
             synchronized(f) {
@@ -198,13 +225,18 @@ object Viagens {
         return o
     }
 
+    /**
+     * [comLista]=false: só os números (sem copiar as viagens). A tela do carro (5 em 5 s), o Painel (3 em 3 s)
+     * e as frases do Jarvis só usam os números; antes cada chamada copiava até 40 viagens com o trajeto
+     * (toString + ler de novo), na linha principal.
+     */
     @Synchronized
-    fun resumo(dias: Int, comTrajeto: Boolean = false): JSONObject {
+    fun resumo(dias: Int, comTrajeto: Boolean = false, comLista: Boolean = true): JSONObject {
         val desde = System.currentTimeMillis() - dias * 24L * 3600 * 1000
         val lista = viagens.filter { it.optLong("inicio") >= desde && it.has("fim") }
         val km = lista.sumOf { it.optDouble("km") }
         val min = lista.sumOf { it.optLong("duracao_min") }
-        return JSONObject()
+        val r = JSONObject()
             .put("periodo_dias", dias)
             .put("viagens", lista.size)
             .put("km_total", Math.round(km * 10) / 10.0)
@@ -212,9 +244,10 @@ object Viagens {
             .put("vel_max_kmh", lista.maxOfOrNull { it.optLong("vel_max_kmh") } ?: 0)
             .put("nota_media", lista.filter { it.has("nota") }.map { it.optInt("nota") }.let { if (it.isEmpty()) JSONObject.NULL else it.average().toInt() })
             .put("em_andamento", ativa != null)
-            .put("lista", JSONArray(lista.takeLast(40).map { v ->
-                JSONObject(v.toString()).apply { remove("ultimo_ponto"); remove("salvo_em"); if (!comTrajeto) remove("trajeto") }
-            }))
+        if (!comLista) return r
+        return r.put("lista", JSONArray(lista.takeLast(40).map { v ->
+            JSONObject(v.toString()).apply { remove("ultimo_ponto"); remove("salvo_em"); if (!comTrajeto) remove("trajeto") }
+        }))
     }
 
     @Synchronized

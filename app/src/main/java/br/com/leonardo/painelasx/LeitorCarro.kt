@@ -61,7 +61,7 @@ object LeitorCarro {
         medirInicio("viagens") { Viagens.iniciar(app) }
         Thread({
             try {
-                val acoes = acoesDaFabrica(app)
+                val acoes = acoesDaFabricaGuardadas(app)
                 ouvir(app, acoes)
                 Registro.anotar("leitor: ouvindo ${acoes.size} avisos da central")
             } catch (e: Throwable) {
@@ -102,10 +102,38 @@ object LeitorCarro {
         return m
     }
 
+    /**
+     * Quais ajustes ler direto (sem abrir o getprop). A lista vem de uma leitura completa pelo getprop,
+     * repetida a cada 60 s (acha ajustes novos); entre elas, de 3 em 3 s, só os ajustes já conhecidos, lidos direto.
+     * Só lê direto depois de conferir que dá o mesmo resultado do getprop; senão faz como antes (getprop a cada 3 s).
+     */
+    private fun lerDireto(chaves: Collection<String>): Map<String, String>? {
+        val m = HashMap<String, String>()
+        for (k in chaves) {
+            m[k] = (Props.direto(k) ?: return null).trimEnd(']')
+        }
+        return m
+    }
+
     private fun vigiarPropriedades() {
         var primeira = true
+        var chaves: Collection<String> = emptyList()
+        var direto = false
+        var avisouDireto = false
+        var ultimaCompleta = 0L
         while (true) {
-            val novas = lerPropsFiltradas()
+            val agora = android.os.SystemClock.elapsedRealtime()
+            val rapida = if (direto && agora - ultimaCompleta < 60_000) lerDireto(chaves) else null
+            val novas = rapida ?: lerPropsFiltradas().also { m ->
+                ultimaCompleta = agora
+                chaves = m.keys
+                val conferida = if (m.isEmpty()) null else lerDireto(m.keys)
+                direto = conferida != null && conferida == m
+                if (direto && !avisouDireto) {
+                    avisouDireto = true
+                    Registro.anotar("leitor: ajustes lidos direto (getprop só 1 vez por minuto)")
+                }
+            }
             synchronized(this) {
                 for ((k, v) in novas) {
                     val antes = propsAtuais[k]
@@ -217,6 +245,28 @@ object LeitorCarro {
             }
         }
         return acoes.toList().take(250)
+    }
+
+    /**
+     * Igual a [acoesDaFabrica], mas guarda o resultado num arquivo: abrir e ler os APKs de fábrica a cada vez que o
+     * app abre (muitas vezes por dia, porque a central fecha o app ao dormir) gastava ~1 s de processador bem na partida.
+     * Lê de novo só se algum app de fábrica mudou (caminho, tamanho ou data do APK) ou se o Painel ASX foi atualizado.
+     */
+    private fun acoesDaFabricaGuardadas(ctx: Context): List<String> {
+        val f = java.io.File(ctx.filesDir, "acoes_fabrica.txt")
+        val marca = "v" + BuildConfig.VERSION_CODE + ";" + pacotesDaFabrica(ctx).joinToString(";") { a ->
+            val apk = java.io.File(a.sourceDir)
+            "${a.packageName}|${a.sourceDir}|${apk.length()}|${apk.lastModified()}"
+        }.hashCode()
+        try {
+            if (f.exists()) {
+                val linhas = f.readLines()
+                if (linhas.size > 1 && linhas[0] == marca) return linhas.drop(1).filter { it.isNotBlank() }
+            }
+        } catch (_: Exception) { }
+        val acoes = acoesDaFabrica(ctx)
+        try { Arquivo.gravarSeguro(f, marca + "\n" + acoes.joinToString("\n") + "\n") } catch (_: Exception) { }
+        return acoes
     }
 
     /** O "mapa" completo, para o Claude estudar. */

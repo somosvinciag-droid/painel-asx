@@ -362,44 +362,53 @@ class TelaCarro : Activity() {
 
     // ---------------------------------------------------------------- atualização (1 vez por segundo)
 
+    private val BR = Locale("pt", "BR")
+    private val formatoHora = SimpleDateFormat("HH:mm", BR)
+
+    /**
+     * Só troca o texto se mudou. Trocar o texto de um TextView "do tamanho do conteúdo" (hora, velocidade...)
+     * pede para medir e arrumar a tela inteira de novo; antes isso acontecia todo segundo, mesmo sem mudar nada.
+     */
+    private fun TextView.por(t: CharSequence) { if (!android.text.TextUtils.equals(text, t)) text = t }
+
     private fun pintar() {
-        hora.text = SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date())
+        hora.por(formatoHora.format(Date()))
         val kmh = Carro.velocidadeKmh.toInt()
         val lim = Config.limite(this)
-        velocidade.text = kmh.toString()
+        velocidade.por(kmh.toString())
         velocidade.setTextColor(if (kmh > lim) VERMELHO else TEXTO)
         barra.mostrar(kmh, lim)
-        limite.text = "LIMITE $lim"
-        if (Voz.ultimaFala.isNotBlank()) fala.text = Voz.ultimaFala
+        limite.por("LIMITE $lim")
+        if (Voz.ultimaFala.isNotBlank()) fala.por(Voz.ultimaFala)
 
         if (tique % 2 == 0) {
             val t = Musica.tocando(this)
             if (t == null) {
-                fonteMusica.text = "MÚSICA"
-                musica.text = if (Voz.tocandoMusica()) "Música tocando" else "Nada tocando"
-                artista.text = if (!Musica.podeVerMusica(this)) "Ligue o \"voltar sozinho\" para ver a música" else "—"
+                fonteMusica.por("MÚSICA")
+                musica.por(if (Voz.tocandoMusica()) "Música tocando" else "Nada tocando")
+                artista.por(if (!Musica.podeVerMusica(this)) "Ligue o \"voltar sozinho\" para ver a música" else "—")
                 capa.mostrar(null); progresso.mostrar(0f)
             } else {
-                fonteMusica.text = t.fonte
-                musica.text = t.titulo
-                artista.text = t.artista.ifBlank { "—" }
+                fonteMusica.por(t.fonte)
+                musica.por(t.titulo)
+                artista.por(t.artista.ifBlank { "—" })
                 capa.mostrar(t.capa)
                 progresso.mostrar(if (t.duracaoMs > 0) (t.posicaoMs.toFloat() / t.duracaoMs).coerceIn(0f, 1f) else 0f)
                 playIcone.tipo = if (t.tocando) Icone.PAUSA else Icone.PLAY
             }
         }
         if (tique % 5 == 0) {
-            clima.text = Clima.curto()
+            clima.por(Clima.curto())
             val kml = Diario.consumoMedio(this)
-            consumo.text = kml?.let { "%.1f".format(Locale("pt", "BR"), it) + " km/l" } ?: "— km/l"
-            consumoNota.text = if (kml != null) "média do último tanque" else "fale \"abasteci 40 litros 230 reais\""
+            consumo.por(kml?.let { "%.1f".format(BR, it) + " km/l" } ?: "— km/l")
+            consumoNota.por(if (kml != null) "média do último tanque" else "fale \"abasteci 40 litros 230 reais\"")
             val ck = Diario.custoPorKm(this)
-            custo.text = ck?.let { "%.2f".format(Locale("pt", "BR"), it.first) + " R$/km" } ?: "— R$/km"
-            custoNota.text = ck?.let { "combustível a R$ " + "%.2f".format(Locale("pt", "BR"), it.second) } ?: "depois do 2º abastecimento"
-            val d = Viagens.resumo(1)
-            val km = "%.1f".format(Locale("pt", "BR"), d.optDouble("km_total", 0.0))
+            custo.por(ck?.let { "%.2f".format(BR, it.first) + " R$/km" } ?: "— R$/km")
+            custoNota.por(ck?.let { "combustível a R$ " + "%.2f".format(BR, it.second) } ?: "depois do 2º abastecimento")
+            val d = Viagens.resumo(1, comLista = false)
+            val km = "%.1f".format(BR, d.optDouble("km_total", 0.0))
             val manut = try { Diario.manutencao(this).firstOrNull { it.second }?.first } catch (_: Exception) { null }
-            detalhe.text = "Hoje $km km em ${d.optInt("viagens")} viagens." + (manut?.let { " ${it.replaceFirstChar { c -> c.uppercase() }}." } ?: "")
+            detalhe.por("Hoje $km km em ${d.optInt("viagens")} viagens." + (manut?.let { " ${it.replaceFirstChar { c -> c.uppercase() }}." } ?: ""))
         }
         if (tique % 30 == 0) Rede.emSegundoPlano("tela-inicial") {
             val ja = Nwd.somosTelaInicial(this)

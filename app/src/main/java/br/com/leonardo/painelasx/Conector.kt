@@ -78,6 +78,7 @@ object Conector {
         var espera = 3000L
         var ultimoRelatorio = 0L
         var mandouDiagnostico = false
+        var ultimoEstado = ""
         while (true) {
             try {
                 if (!prefs(ctx).getBoolean("registrado", false)) {
@@ -94,11 +95,19 @@ object Conector {
                     Registro.anotar("conector: registrado")
                 }
 
-                // Relatorio: estado + linhas novas do registro (+ diagnostico 1 vez por ligacao)
+                // Relatorio: estado + linhas novas do registro (+ diagnostico 1 vez por ligacao).
+                // Estado igual ao último (fora a hora) e nada novo no registro: só manda de 5 em 5 min
+                // (antes mandava todo minuto o mesmo estado; o "online" do servidor vem do pedido de comandos).
                 val agora = System.currentTimeMillis()
                 val linhas = Registro.pegarParaEnviar()
-                if (linhas.isNotEmpty() || agora - ultimoRelatorio > 60_000 || !mandouDiagnostico) {
-                    val corpo = JSONObject().put("estado", estado(ctx)).put("linhas", JSONArray(linhas))
+                val est = estado(ctx)
+                est.remove("hora_central")
+                val assinatura = est.toString()
+                est.put("hora_central", agora)
+                val passou = agora - ultimoRelatorio
+                if (linhas.isNotEmpty() || !mandouDiagnostico || passou > 5 * 60_000 ||
+                    (passou > 60_000 && assinatura != ultimoEstado)) {
+                    val corpo = JSONObject().put("estado", est).put("linhas", JSONArray(linhas))
                     if (!mandouDiagnostico) corpo.put("diagnostico", Diagnostico.texto(ctx))
                     // Sem internet no meio do envio: devolve as linhas (antes os erros dessa hora se perdiam).
                     val r = try { pedir("POST", "/app/relatorio", corpo) } catch (e: Exception) { Registro.devolverParaEnviar(linhas); throw e }
@@ -112,14 +121,17 @@ object Conector {
                         val o = JSONObject(r.second)
                         Config.jarvisConversa = o.optBoolean("jarvis", false)
                         Config.jarvisAtlas = o.optBoolean("atlas", false)
+                        mudarGzip(ctx, o.optBoolean("gzip", false))
                     } catch (_: Exception) { }
                     ultimoRelatorio = agora
+                    ultimoEstado = assinatura
                     mandouDiagnostico = true
                 }
 
                 // Espera comando do Claude (ate ~20 s)
                 val r = pedir("GET", "/app/comandos", null, leituraMs = 35_000)
                 if (r.first != 200) throw Exception("comandos deu ${r.first}")
+                if (!online) try { Ouvido.internetVoltou() } catch (_: Exception) { }
                 online = true
                 ultimoErro = ""
                 espera = 3000L
@@ -241,12 +253,30 @@ object Conector {
         c.readTimeout = leituraMs
         c.setRequestProperty("User-Agent", "painel-asx/" + BuildConfig.VERSION_CODE)
         if (!semChave) c.setRequestProperty("Authorization", "Bearer " + chaveAppCache)
+        var comprimido = false
         if (corpo != null) {
             c.doOutput = true
             c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            c.outputStream.use { it.write(corpo.toString().toByteArray(Charsets.UTF_8)) }
+            var bytes = corpo.toString().toByteArray(Charsets.UTF_8)
+            // Corpo grande (diagnóstico, backup, respostas ao Claude) vai comprimido, se o servidor aceitar:
+            // texto e JSON ficam 2,5 a 4,5 vezes menores (menos internet do celular).
+            if (servidorGzip && bytes.size > 1024) {
+                val b = java.io.ByteArrayOutputStream(bytes.size / 3)
+                java.util.zip.GZIPOutputStream(b).use { it.write(bytes) }
+                bytes = b.toByteArray()
+                comprimido = true
+                c.setRequestProperty("Content-Encoding", "gzip")
+            }
+            c.setFixedLengthStreamingMode(bytes.size)
+            c.outputStream.use { it.write(bytes) }
         }
         val code = c.responseCode
+        // Servidor antigo (sem gzip) recusa o corpo comprimido: volta a mandar sem comprimir (o envio é repetido
+        // depois pelo próprio laço/fila, como em qualquer falha).
+        if (comprimido && code in listOf(400, 415, 500)) {
+            servidorGzip = false
+            Registro.anotar("conector: o servidor não aceitou o envio comprimido ($code); volto a mandar sem comprimir")
+        }
         val txt = try {
             (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.readText() ?: ""
         } catch (_: Exception) { "" }
@@ -255,6 +285,14 @@ object Conector {
     }
 
     @Volatile private var chaveAppCache = ""
+    /** O servidor aceita corpo comprimido (gzip)? Ele diz isso na resposta do relatório. */
+    @Volatile private var servidorGzip = false
+
+    private fun mudarGzip(ctx: Context, v: Boolean) {
+        if (v == servidorGzip && prefs(ctx).getBoolean("gzip", false) == v) return
+        servidorGzip = v
+        prefs(ctx).edit().putBoolean("gzip", v).apply()
+    }
 
     /** Pedido ao servidor do conector (fora da linha principal). */
     fun enviar(caminho: String, corpo: JSONObject, leituraMs: Int = 20_000): Pair<Int, String> {
@@ -284,6 +322,7 @@ object Conector {
     /** Chamado antes de iniciar, para a chave estar pronta. */
     fun preparar(ctx: Context) {
         chaveAppCache = chaveApp(ctx)
+        servidorGzip = prefs(ctx).getBoolean("gzip", false)
         tokenMcp(ctx)
     }
 }
