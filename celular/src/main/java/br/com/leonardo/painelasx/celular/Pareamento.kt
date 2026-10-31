@@ -74,9 +74,12 @@ object Pareamento {
 
     /** Uma central nova quer se ligar: aviso com "Permitir" e "Recusar". */
     fun pedir(ctx: Context, id: String) {
-        if (pendente == id) return
-        pendente = id
         val nm = nm(ctx)
+        // Mesmo pedido e o aviso ainda está na barra: não repete. Se o aviso foi fechado (deslizado ou tocado)
+        // e a central voltou a pedir, mostra de novo.
+        val avisoNaBarra = try { nm.activeNotifications.any { it.id == ID_AVISO } } catch (_: Exception) { false }
+        if (pendente == id && avisoNaBarra) return
+        pendente = id
         if (nm.getNotificationChannel(CANAL) == null) {
             nm.createNotificationChannel(NotificationChannel(CANAL, "Permitir o carro", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Pergunta se uma central de carro pode se ligar a este celular."
