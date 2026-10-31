@@ -24,9 +24,6 @@ import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
 import java.io.File
 import java.io.FileOutputStream
-import java.io.RandomAccessFile
-import java.net.HttpURLConnection
-import java.net.URL
 
 /**
  * Ouvido próprio do Jarvis: entende a fala do Leonardo DENTRO da central, sem internet.
@@ -107,6 +104,7 @@ object Ouvido {
 
     /** Frase para o Leonardo quando ainda não dá para ouvir. */
     fun explicacao(): String = when {
+        estado.startsWith("baixando a voz") -> "Estou baixando as bibliotecas da voz, que o meu ouvido também usa, senhor. Fica pronto uma vez só."
         estado.startsWith("baixando") -> "Ainda estou baixando o meu ouvido, senhor. Está em ${estado.substringAfter("baixando ").trim()}. Fica pronto uma vez só."
         estado.startsWith("esperando") -> "Meu ouvido está esperando a internet para baixar, senhor."
         estado.startsWith("erro") -> "Meu ouvido deu um problema, senhor. Peça ao Claude para olhar o registro."
@@ -129,11 +127,12 @@ object Ouvido {
                     if (!conferirArquivos(ctx)) mudarQuebras(ctx, 0)  // arquivo cortado: baixa de novo e tenta outra vez
                 }
             }
-            val vozOk = File(ctx.filesDir, "voz/ok").exists()
-            if (!vozOk) {
-                estado = "esperando a voz própria"
-                h?.postDelayed({ baixarECarregar(ctx) }, 60_000)
-                return
+            if (!File(ctx.filesDir, "voz/ok").exists()) {
+                // O ouvido usa as bibliotecas do pacote da voz própria ("voz-1"). Com a voz do Google escolhida,
+                // a voz própria não baixa nada e o ouvido ficava para sempre esperando: o próprio ouvido baixa
+                // o pacote (uma vez só). Se a voz própria já estiver baixando, só espera ela terminar (sem baixar 2 vezes).
+                estado = "baixando a voz (o ouvido usa as bibliotecas dela)"
+                VozPropria.baixarPacote(ctx)
             }
             if (!baixado(ctx)) {
                 val d = dir(ctx); d.mkdirs()
@@ -146,7 +145,7 @@ object Ouvido {
                 for ((i, nome) in ARQUIVOS.withIndex()) {
                     val f = File(d, nome)
                     if (f.exists()) continue   // só existe depois de baixado inteiro (conferido pelo tamanho)
-                    baixar("https://github.com/${BuildConfig.REPO}/releases/download/$PACOTE/$nome", f) { pct ->
+                    Arquivo.baixar("https://github.com/${BuildConfig.REPO}/releases/download/$PACOTE/$nome", f) { pct ->
                         estado = "baixando ${(i * 100 + pct) / ARQUIVOS.size}%"
                     }
                 }
@@ -247,78 +246,6 @@ object Ouvido {
                 }
             }
         }
-    }
-
-    /**
-     * Baixa continuando de onde parou (a internet do celular por Bluetooth pode cair no meio).
-     * Só troca o ".parte" pelo arquivo de verdade quando o tamanho bate com o que o servidor disse.
-     */
-    private fun baixar(url: String, destino: File, progresso: (Int) -> Unit) {
-        val tmp = File(destino.parentFile, destino.name + ".parte")
-        var u = url
-        var tentativas = 0
-        var recomecou = false
-        while (true) {
-            val ja = if (tmp.exists()) tmp.length() else 0L
-            val c = URL(u).openConnection() as HttpURLConnection
-            try {
-                c.instanceFollowRedirects = false
-                c.connectTimeout = 20_000
-                c.readTimeout = 60_000
-                c.setRequestProperty("User-Agent", "painel-asx")
-                // Sem gzip: o tamanho que o servidor informa tem de ser o do arquivo.
-                c.setRequestProperty("Accept-Encoding", "identity")
-                if (ja > 0) c.setRequestProperty("Range", "bytes=$ja-")
-                val code = c.responseCode
-                if (code in 300..399) {
-                    u = c.getHeaderField("Location") ?: throw Exception("redirecionamento sem endereço")
-                    if (++tentativas > 6) throw Exception("redirecionamentos demais")
-                    continue
-                }
-                if (code == 416) {
-                    // "Já tenho tudo"? Só se o tamanho total que o servidor diz for igual ao do .parte.
-                    val totalServidor = c.getHeaderField("Content-Range")?.substringAfterLast('/')?.trim()?.toLongOrNull()
-                    if (totalServidor != null && totalServidor == ja) break
-                    if (recomecou) throw Exception("download deu 416 (${tmp.length()} bytes, servidor diz $totalServidor)")
-                    tmp.delete(); recomecou = true; u = url
-                    continue
-                }
-                if (code != 200 && code != 206) throw Exception("download deu $code")
-                val continuar = code == 206 && ja > 0
-                val resto = c.contentLengthLong
-                val total = when {
-                    continuar -> c.getHeaderField("Content-Range")?.substringAfterLast('/')?.trim()?.toLongOrNull()
-                        ?: if (resto > 0) ja + resto else -1L
-                    else -> resto
-                }
-                RandomAccessFile(tmp, "rw").use { raf ->
-                    if (continuar) raf.seek(ja) else raf.setLength(0)
-                    var feito = if (continuar) ja else 0L
-                    var ultimo = -1
-                    val buf = ByteArray(64 * 1024)
-                    try {
-                        c.inputStream.use { i ->
-                            while (true) {
-                                val n = i.read(buf); if (n < 0) break
-                                raf.write(buf, 0, n); feito += n
-                                if (total > 0) {
-                                    val pct = (feito * 100 / total).toInt()
-                                    if (pct != ultimo) { ultimo = pct; progresso(pct) }
-                                }
-                            }
-                        }
-                    } finally {
-                        try { raf.fd.sync() } catch (_: Exception) { }  // o que chegou fica salvo para continuar depois
-                    }
-                    if (total > 0 && feito != total) throw Exception("download incompleto ($feito de $total)")
-                    if (total <= 0 && feito < 1024) throw Exception("download vazio")
-                }
-                break
-            } finally {
-                c.disconnect()
-            }
-        }
-        if (!tmp.renameTo(destino)) throw Exception("não consegui guardar ${destino.name}")
     }
 
     // ------------------------------------------------------------------ ouvir

@@ -13,8 +13,6 @@ import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import java.io.File
 import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.zip.ZipInputStream
 
 /**
@@ -125,17 +123,25 @@ object VozPropria {
         h = Handler(t.looper).also { it.post { carregar(ctx.applicationContext) } }
     }
 
-    private fun carregar(ctx: Context) {
+    private val travaPacote = Any()
+
+    /**
+     * Baixa e instala o pacote "voz-1" (bibliotecas do motor + voz), se ainda não estiver na central.
+     * Também é usado pelo ouvido (ele usa as mesmas bibliotecas), mesmo com a voz própria desligada.
+     * A trava impede que a voz e o ouvido baixem o pacote ao mesmo tempo. O download continua de onde parou.
+     */
+    fun baixarPacote(ctx: Context) = synchronized(travaPacote) {
+        val dir = File(ctx.filesDir, "voz")
+        val ok = File(dir, "ok")
+        if (ok.exists()) return@synchronized
+        estado = "baixando"
         try {
-            val dir = File(ctx.filesDir, "voz")
-            val ok = File(dir, "ok")
-            if (!ok.exists()) {
-                estado = "baixando"
-                Registro.anotar("voz própria: baixando o pacote (${abi()})")
-                dir.deleteRecursively(); dir.mkdirs()
-                val zip = File(ctx.filesDir, "voz.zip")
-                baixar("https://github.com/${BuildConfig.REPO}/releases/download/$PACOTE/voz-${abi()}.zip", zip)
-                estado = "instalando"
+            Registro.anotar("voz própria: baixando o pacote (${abi()})")
+            dir.deleteRecursively(); dir.mkdirs()
+            val zip = File(ctx.filesDir, "voz.zip")
+            Arquivo.baixar("https://github.com/${BuildConfig.REPO}/releases/download/$PACOTE/voz-${abi()}.zip", zip)
+            estado = "instalando"
+            try {
                 ZipInputStream(zip.inputStream().buffered()).use { z ->
                     var e = z.nextEntry
                     while (e != null) {
@@ -149,10 +155,26 @@ object VozPropria {
                         e = z.nextEntry
                     }
                 }
-                zip.delete()
-                Arquivo.gravarSeguro(ok, "1")
-                Registro.anotar("voz própria: pacote instalado")
+            } finally {
+                zip.delete()   // zip estragado: na próxima tentativa baixa de novo, do zero
             }
+            Arquivo.gravarSeguro(ok, "1")
+            Registro.anotar("voz própria: pacote instalado")
+        } finally {
+            estado = when {
+                ok.exists() && ligada(ctx) -> "carregando"
+                ok.exists() -> "desligada (pacote baixado)"
+                ligada(ctx) -> "esperando a internet"
+                else -> "desligada"
+            }
+        }
+    }
+
+    private fun carregar(ctx: Context) {
+        if (!ligada(ctx)) { linha?.quitSafely(); linha = null; h = null; return }  // desligada enquanto esperava
+        try {
+            val dir = File(ctx.filesDir, "voz")
+            baixarPacote(ctx)
             estado = "carregando"
             System.load(File(dir, "libonnxruntime.so").absolutePath)
             System.load(File(dir, "libsherpa-onnx-jni.so").absolutePath)
@@ -178,26 +200,14 @@ object VozPropria {
             Registro.anotar("ERRO voz própria: ${e.javaClass.simpleName}: ${e.message}")
             if (e is UnsatisfiedLinkError) File(ctx.filesDir, "voz/ok").delete()
             tts = null
-            linha?.quitSafely(); linha = null; h = null
+            if (e !is UnsatisfiedLinkError && !File(ctx.filesDir, "voz/ok").exists() && ligada(ctx)) {
+                // Não baixou (internet fraca): tenta de novo em 5 min. Antes desistia até o app reiniciar.
+                estado = "esperando a internet"
+                h?.postDelayed({ carregar(ctx) }, 5 * 60_000)
+            } else {
+                linha?.quitSafely(); linha = null; h = null
+            }
         }
-    }
-
-    private fun baixar(url: String, destino: File) {
-        var u = url
-        repeat(5) {
-            val c = URL(u).openConnection() as HttpURLConnection
-            c.instanceFollowRedirects = false
-            c.connectTimeout = 20_000
-            c.readTimeout = 60_000
-            c.setRequestProperty("User-Agent", "painel-asx")
-            val code = c.responseCode
-            if (code in 300..399) { u = c.getHeaderField("Location"); c.disconnect(); return@repeat }
-            if (code != 200) throw Exception("download deu $code")
-            c.inputStream.use { i -> FileOutputStream(destino).use { i.copyTo(it, 64 * 1024) } }
-            c.disconnect()
-            return
-        }
-        throw Exception("redirecionamentos demais")
     }
 
     /** Fala com a voz própria (fila, uma frase de cada vez). [entao] roda no fim, na linha principal. */

@@ -15,6 +15,7 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Atualizacao automatica.
@@ -25,7 +26,8 @@ import java.net.URL
 object Atualizador {
     const val NOME_APK = "painel-asx.apk"
     private const val JOB_ID = 4811
-    @Volatile private var ocupado = false
+    /** Só uma verificação/download por vez (o despertador, o Controle e o botão podem chamar juntos). */
+    private val ocupado = AtomicBoolean(false)
 
     private const val PERIODO = 15 * 60 * 1000L // de 15 em 15 minutos (tambem e o "despertador" do app)
 
@@ -81,31 +83,22 @@ object Atualizador {
      * (usado quando o Leonardo aprova: toque no aviso, botão no app ou pedido pelo Claude).
      */
     fun verificar(ctx: Context, instalar: Boolean = true, aviso: (String) -> Unit) {
-        if (ocupado) { aviso("Já estou verificando."); return }
-        ocupado = true
+        if (!ocupado.compareAndSet(false, true)) { aviso("Já estou verificando."); return }
         try {
-            val url = URL("https://api.github.com/repos/${BuildConfig.REPO}/releases/latest")
-            val c = url.openConnection() as HttpURLConnection
-            c.connectTimeout = 15000
-            c.readTimeout = 15000
-            c.setRequestProperty("Accept", "application/vnd.github+json")
-            c.setRequestProperty("User-Agent", "painel-asx")
-            if (c.responseCode != 200) {
-                aviso("Não consegui falar com o GitHub (código ${c.responseCode}).")
-                return
-            }
-            val json = JSONObject(c.inputStream.bufferedReader().readText())
+            val json = ultimaVersao() ?: run { aviso("Não consegui falar com o GitHub."); return }
             val tag = json.optString("tag_name")
             val numero = tag.filter { it.isDigit() }.toIntOrNull() ?: 0
             if (numero <= BuildConfig.VERSION_CODE) {
+                limparBaixados(ctx, null)
                 aviso("Você já está na versão mais nova (v${BuildConfig.VERSION_CODE}).")
                 return
             }
             val assets = json.getJSONArray("assets")
             var link: String? = null
+            var tamanho = -1L
             for (i in 0 until assets.length()) {
                 val a = assets.getJSONObject(i)
-                if (a.optString("name") == NOME_APK) link = a.optString("browser_download_url")
+                if (a.optString("name") == NOME_APK) { link = a.optString("browser_download_url"); tamanho = a.optLong("size", -1L) }
             }
             if (link == null) { aviso("A versão $tag ainda não tem o arquivo do app."); return }
 
@@ -120,42 +113,96 @@ object Atualizador {
 
             aviso("Baixando a versão $tag…")
             Registro.anotar("atualizacao: baixando $tag")
-            val destino = File(ctx.cacheDir, "atualizacao.apk")
-            baixar(link, destino)
+            // Um arquivo por versão: o pedaço já baixado de uma versão nunca se mistura com outra.
+            val destino = File(ctx.cacheDir, "atualizacao-$numero.apk")
+            limparBaixados(ctx, destino)
+            if (destino.exists() && tamanho > 0 && destino.length() != tamanho) destino.delete()
+            if (!destino.exists()) baixarComPaciencia(link, destino)
+            conferirApk(ctx, destino, tamanho)
             aviso("Instalando a versão $tag…")
-            instalar(ctx, destino)
+            if (!instalar(ctx, destino)) aviso("Falta permitir \"instalar apps desconhecidos\" para o Painel ASX.")
         } catch (e: Exception) {
             Registro.anotar("atualizacao: erro ${e.javaClass.simpleName}: ${e.message}")
             aviso("Sem internet ou erro ao atualizar. Tento de novo mais tarde.")
         } finally {
-            ocupado = false
+            ocupado.set(false)
         }
     }
 
-    private fun baixar(link: String, destino: File) {
-        var endereco = link
-        repeat(5) {
-            val c = URL(endereco).openConnection() as HttpURLConnection
-            c.instanceFollowRedirects = false
-            c.connectTimeout = 20000
-            c.readTimeout = 60000
-            c.setRequestProperty("User-Agent", "painel-asx")
-            val code = c.responseCode
-            if (code in 300..399) {
-                endereco = c.getHeaderField("Location") ?: throw Exception("redirecionamento sem destino")
-                return@repeat
+    /**
+     * Pergunta ao GitHub a última versão. Tenta 3 vezes: com a internet do celular por Bluetooth a conexão
+     * às vezes cai antes da resposta ("unexpected end of stream"), e na segunda tentativa costuma dar certo.
+     */
+    private fun ultimaVersao(): JSONObject? {
+        var erro: Exception? = null
+        for (t in 1..3) {
+            val c = URL("https://api.github.com/repos/${BuildConfig.REPO}/releases/latest").openConnection() as HttpURLConnection
+            try {
+                c.connectTimeout = 15000
+                c.readTimeout = 15000
+                c.setRequestProperty("Accept", "application/vnd.github+json")
+                c.setRequestProperty("User-Agent", "painel-asx")
+                val code = c.responseCode
+                if (code != 200) { Registro.anotar("atualizacao: GitHub respondeu $code"); return null }
+                return JSONObject(c.inputStream.bufferedReader().readText())
+            } catch (e: java.io.IOException) {
+                erro = e
+                if (t < 3) Thread.sleep(3000L * t)
+            } finally {
+                c.disconnect()
             }
-            if (code != 200) throw Exception("download deu $code")
-            c.inputStream.use { entrada -> destino.outputStream().use { entrada.copyTo(it) } }
-            return
         }
-        throw Exception("redirecionamentos demais")
+        throw erro ?: Exception("GitHub não respondeu")
     }
 
-    private fun instalar(ctx: Context, apk: File) {
+    /** Baixa continuando de onde parou; se a conexão cair no meio, tenta mais 3 vezes antes de desistir. */
+    private fun baixarComPaciencia(link: String, destino: File) {
+        var erro: Exception? = null
+        for (t in 1..4) {
+            try {
+                Arquivo.baixar(link, destino)
+                return
+            } catch (e: Exception) {
+                erro = e
+                val parte = File(destino.parentFile, destino.name + ".parte")
+                Registro.anotar("atualizacao: download parou (${e.javaClass.simpleName}: ${e.message}); " +
+                    "${parte.length() / 1024} KB guardados" + (if (t < 4) ", continuo de onde parou" else ""))
+                if (t < 4) Thread.sleep(3000L * t)
+            }
+        }
+        throw erro ?: Exception("download falhou")
+    }
+
+    /** Confere o APK antes de instalar: tamanho igual ao do GitHub e o Android consegue ler (é mesmo o Painel ASX, mais novo). */
+    private fun conferirApk(ctx: Context, apk: File, tamanho: Long) {
+        if (tamanho > 0 && apk.length() != tamanho) {
+            apk.delete()
+            throw Exception("APK com tamanho errado (${apk.length()} de $tamanho bytes); apaguei para baixar de novo")
+        }
+        val info = try { ctx.packageManager.getPackageArchiveInfo(apk.absolutePath, 0) } catch (_: Exception) { null }
+        @Suppress("DEPRECATION")
+        val versao = info?.let { if (Build.VERSION.SDK_INT >= 28) it.longVersionCode else it.versionCode.toLong() } ?: -1L
+        if (info == null || info.packageName != ctx.packageName || versao <= BuildConfig.VERSION_CODE) {
+            apk.delete()
+            throw Exception("APK estragado ou errado (pacote ${info?.packageName}, versão $versao); apaguei para baixar de novo")
+        }
+    }
+
+    /** Apaga APKs e pedaços de versões antigas (só fica o [manter] e o pedaço dele). */
+    private fun limparBaixados(ctx: Context, manter: File?) {
+        try {
+            ctx.cacheDir.listFiles()?.forEach { f ->
+                if (f.name.startsWith("atualizacao") && (manter == null ||
+                        (f.name != manter.name && f.name != manter.name + ".parte"))) f.delete()
+            }
+        } catch (_: Exception) { }
+    }
+
+    /** false = falta a permissão de instalar apps desconhecidos. */
+    private fun instalar(ctx: Context, apk: File): Boolean {
         if (!ctx.packageManager.canRequestPackageInstalls()) {
             Registro.anotar("atualizacao: falta permitir 'instalar apps desconhecidos'")
-            return
+            return false
         }
         val pi = ctx.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
@@ -164,9 +211,14 @@ object Atualizador {
         }
         val id = pi.createSession(params)
         pi.openSession(id).use { s ->
-            s.openWrite("app", 0, apk.length()).use { saida ->
-                apk.inputStream().use { it.copyTo(saida) }
-                s.fsync(saida)
+            try {
+                s.openWrite("app", 0, apk.length()).use { saida ->
+                    apk.inputStream().use { it.copyTo(saida) }
+                    s.fsync(saida)
+                }
+            } catch (e: Exception) {
+                try { s.abandon() } catch (_: Exception) { }   // não deixa sessão de instalação pendurada
+                throw e
             }
             marcarReabrir(ctx, MainActivity.naTela)
             Controle.confirmarInstalacao = true
@@ -176,6 +228,7 @@ object Atualizador {
             val p = PendingIntent.getBroadcast(ctx, 0, i, flags)
             s.commit(p.intentSender)
         }
+        return true
     }
 }
 
