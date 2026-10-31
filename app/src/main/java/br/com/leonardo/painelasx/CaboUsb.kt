@@ -131,6 +131,9 @@ object CaboUsb {
     private const val PERMITIU = 5     // o Leonardo tocou em Permitir
     private const val REVER_TARDE = 6  // ainda sem permissão 15 s depois (ninguém respondeu ao "Abrir com" do Android)
 
+    /** Quedas rápidas seguidas (com resposta) antes de largar o cabo até ele ser solto. */
+    private const val MAX_QUEDAS = 8
+
     // Modo "app do celular": os mesmos textos do accessory_filter.xml do app do celular (fabricante + modelo).
     private val TEXTOS = arrayOf(
         "Leonardo", "PainelASX", "Painel ASX do ASX 2012", "1",
@@ -277,6 +280,14 @@ object CaboUsb {
                 aviso = if (modo(ctx) == MODO_AA) "o Android Auto do celular não respondeu pelo cabo (o ZLink pegou o cabo?)"
                     else "o celular não respondeu pelo cabo (o ZLink/Android Auto pegou o cabo?)"
                 Registro.anotar("cabo USB: $aviso Sigo pela rede Bluetooth até o cabo ser solto.")
+                return
+            }
+            // Responde e cai logo, várias vezes seguidas (ex.: o celular recusa o receptor): para de tentar até o cabo
+            // ser solto, em vez de reabrir para sempre. Nada de diálogo: só o aviso e o registro.
+            if (respondeu && curta && n > MAX_QUEDAS) {
+                alheios.add(nome)
+                aviso = "o celular respondeu pelo cabo mas a conexão cai logo ($n vezes); tire e ponha o cabo"
+                Registro.anotar("cabo USB: $aviso")
                 return
             }
             when {
