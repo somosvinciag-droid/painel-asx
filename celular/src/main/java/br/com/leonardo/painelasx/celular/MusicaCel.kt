@@ -104,7 +104,7 @@ object MusicaCel {
     private fun mandarTudo() {
         val m = atual?.metadata
         val bmp = m?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: m?.getBitmap(MediaMetadata.METADATA_KEY_ART)
-        if (bmp == null) {
+        if (m == null || bmp == null) {
             capaChave = ""; capaId = ""; capaMsg = null
         } else {
             val chave = (m.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "") + "|" +
