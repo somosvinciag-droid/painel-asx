@@ -63,6 +63,30 @@ class CanalAoa(
         if (saida.maxPacketSize > 0 && b.size % saida.maxPacketSize == 0) con.bulkTransfer(saida, ByteArray(0), 0, 1000)
     }
 
+    /** Android Auto: lê o que chegar (até [n] bytes) esperando no máximo [esperaMs]. -1 = fechado; 0 = nada. */
+    fun lerBruto(buf: ByteArray, n: Int, esperaMs: Int): Int {
+        if (fechado) return -1
+        val r = try { con.bulkTransfer(entrada, buf, minOf(n, 16384), esperaMs.coerceAtLeast(1)) } catch (_: Exception) { -1 }
+        if (fechado) return -1
+        return if (r > 0) r else 0
+    }
+
+    /**
+     * Android Auto: escreve o quadro inteiro, SEM o pacote vazio do fim (o Headunit Revived também não manda; o
+     * Android Auto do celular não espera por ele). Insiste por até 3 s se o celular demorar a ler.
+     */
+    fun escreverBruto(b: ByteArray): Boolean {
+        var pos = 0
+        val limite = SystemClock.elapsedRealtime() + 3_000
+        while (pos < b.size) {
+            if (fechado) return false
+            val r = try { con.bulkTransfer(saida, b, pos, minOf(16384, b.size - pos), 1000) } catch (_: Exception) { -1 }
+            if (r > 0) { pos += r; continue }
+            if (SystemClock.elapsedRealtime() > limite) return false
+        }
+        return true
+    }
+
     override fun fechar() {
         if (fechado) return
         fechado = true
@@ -72,15 +96,16 @@ class CanalAoa(
 }
 
 /**
- * Cabo USB do celular.
- *  - Interruptor "Cabo USB do celular para o Painel ASX" (padrão LIGADO desde 31/10; desligado = Android Auto). Desligado,
- *    a central NÃO mexe no cabo: nenhum filtro USB ligado, nenhum pedido de modo acessório.
- *  - Ligado: o filtro USB do app (activity-alias) faz o Android abrir a CaboActivity ao plugar. Na 1ª vez o Leonardo
- *    escolhe "Painel ASX" e marca "usar por padrão"/"Sempre" (nunca apertamos sozinhos); depois o Android dá a permissão
- *    sozinho a cada plugada. Então a central manda o celular para o modo acessório com os textos do Painel.
+ * Cabo USB do celular. Três modos (escolhidos na tela de ajustes, "Cabo USB do celular"):
+ *  - "Android Auto pelo Painel" (PADRÃO desde o receptor): a central manda o celular para o modo acessório com a
+ *    identidade do Android Auto e o próprio Painel é o receptor ([AndroidAuto]). Nada de app nosso no celular.
+ *  - "app Painel ASX Celular" (secundário): os textos do Painel; conversa em JSON com o app do celular ([CaboCelular]).
+ *  - "ZLink": a central NÃO mexe no cabo (nenhum filtro USB ligado, nenhum pedido de modo acessório).
+ *  - Nos dois primeiros, o filtro USB do app (activity-alias) faz o Android abrir a CaboActivity ao plugar. Na 1ª vez o
+ *    Leonardo escolhe "Painel ASX" e marca "usar por padrão"/"Sempre" (nunca apertamos sozinhos); depois o Android dá a
+ *    permissão sozinho a cada plugada.
  *  - Nunca pergunta a permissão sem parar: no máximo [MAX_PEDIDOS] vezes seguidas sem o "usar por padrão" funcionar.
- *  - O celular no modo acessório que não responde (outro app, como o ZLink/Android Auto, pegou o cabo) é largado e a
- *    central segue pela rede Bluetooth até o cabo ser solto.
+ *  - O celular no modo acessório que não responde (outro app, como o ZLink, pegou o cabo) é largado até o cabo ser solto.
  *  - Diagnóstico (só leitura) para saber se o ZLink pega o cabo com permissão automática (caso B) ou não (caso A).
  */
 object CaboUsb {
@@ -101,11 +126,22 @@ object CaboUsb {
     private const val PERMITIU = 5     // o Leonardo tocou em Permitir
     private const val REVER_TARDE = 6  // ainda sem permissão 15 s depois (ninguém respondeu ao "Abrir com" do Android)
 
-    // Os mesmos textos do accessory_filter.xml do app do celular (fabricante + modelo). Sempre com a versão.
+    // Modo "app do celular": os mesmos textos do accessory_filter.xml do app do celular (fabricante + modelo).
     private val TEXTOS = arrayOf(
         "Leonardo", "PainelASX", "Painel ASX do ASX 2012", "1",
         "https://github.com/somosvinciag-droid/painel-asx/releases/tag/celular", "asx"
     )
+    // Modo "Android Auto pelo Painel": a identidade do Android Auto (as mesmas do Headunit Revived). Com ela o
+    // Android Auto do celular abre sozinho, sem app nosso no celular.
+    private val TEXTOS_AA = arrayOf(
+        "Android", "Android Auto", "Android Auto", "2.0.1",
+        "https://developer.android.com/auto/index.html", "HU-AAAAAA001"
+    )
+
+    /** Modos do cabo. */
+    const val MODO_AA = "aa"         // padrão: o Painel é o receptor de Android Auto (o "ZLink nosso")
+    const val MODO_APP = "app"       // opção secundária: o app "Painel ASX Celular" pelo cabo (protocolo JSON)
+    const val MODO_ZLINK = "zlink"   // o Painel não mexe no cabo (o ZLink de fábrica fica com ele)
 
     @Volatile private var app: Context? = null
     @Volatile private var preparado = false
@@ -121,12 +157,31 @@ object CaboUsb {
     @Volatile var aviso = ""
         private set
 
-    /** Padrão (decisão do Leonardo, 31/10): o cabo é do Painel ASX; o Android Auto com fio fica para o interruptor. */
-    fun usarCabo(ctx: Context) = CaboCelular.prefs(ctx).getBoolean("cabo_painel", true)
+    /**
+     * Modo do cabo. Padrão: "Android Auto pelo Painel". Quem tinha desligado o interruptor antigo ("cabo_painel"
+     * = false, o cabo era do Android Auto/ZLink) continua com o ZLink.
+     */
+    fun modo(ctx: Context): String {
+        val p = CaboCelular.prefs(ctx)
+        p.getString("cabo_modo", null)?.let { if (it == MODO_AA || it == MODO_APP || it == MODO_ZLINK) return it }
+        return if (p.contains("cabo_painel") && !p.getBoolean("cabo_painel", true)) MODO_ZLINK else MODO_AA
+    }
 
-    /** O Leonardo mudou o interruptor. Depois de mudar, é preciso tirar e pôr o cabo. */
-    fun mudarCabo(ctx: Context, painel: Boolean) {
-        CaboCelular.prefs(ctx).edit().putBoolean("cabo_painel", painel).putInt("cabo_pedidos", 0).apply()
+    /** O Painel mexe no cabo (Android Auto pelo Painel ou app do celular). */
+    fun usarCabo(ctx: Context) = modo(ctx) != MODO_ZLINK
+
+    fun nomeModo(m: String) = when (m) {
+        MODO_AA -> "Android Auto pelo Painel"
+        MODO_APP -> "app Painel ASX Celular"
+        else -> "ZLink (o Painel não mexe no cabo)"
+    }
+
+    /** O Leonardo escolheu o modo do cabo. Depois de mudar, é preciso tirar e pôr o cabo. */
+    fun mudarModo(ctx: Context, m: String) {
+        val antes = modo(ctx)
+        CaboCelular.prefs(ctx).edit().putString("cabo_modo", m).putInt("cabo_pedidos", 0).apply()
+        if (antes == MODO_AA && m != MODO_AA) AndroidAuto.parar("modo do cabo mudou")
+        val painel = m != MODO_ZLINK
         aviso = ""
         synchronized(this) { alheios.clear(); tentativas.clear() }
         try {
@@ -138,7 +193,7 @@ object CaboUsb {
         } catch (e: Exception) {
             Registro.anotar("cabo USB: não mudei o filtro (${e.javaClass.simpleName})")
         }
-        Registro.anotar("cabo USB: agora o cabo é do " + if (painel) "Painel ASX" else "Android Auto")
+        Registro.anotar("cabo USB: modo agora é " + nomeModo(m))
         if (painel) procurarJaPlugado(ctx)
     }
 
@@ -148,14 +203,16 @@ object CaboUsb {
         app = a
         if (preparado) return
         preparado = true
-        // Primeira vez com esta versão: liga o filtro do cabo (padrão = Painel ASX), uma vez só.
-        if (!CaboCelular.prefs(a).contains("cabo_painel")) {
-            CaboCelular.prefs(a).edit().putBoolean("cabo_painel", true).apply()
+        // Primeira vez com esta versão: grava o modo (padrão = Android Auto pelo Painel) e liga o filtro do cabo, uma vez só.
+        if (!CaboCelular.prefs(a).contains("cabo_modo")) {
+            val m = modo(a)
+            CaboCelular.prefs(a).edit().putString("cabo_modo", m).apply()
             try {
                 a.packageManager.setComponentEnabledSetting(ComponentName(a.packageName, ALIAS),
-                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
-                Registro.anotar("cabo USB: padrão ligado (o cabo é do Painel ASX)")
-            } catch (e: Exception) { Registro.anotar("cabo USB: não liguei o padrão (${e.javaClass.simpleName})") }
+                    if (m == MODO_ZLINK) PackageManager.COMPONENT_ENABLED_STATE_DISABLED else PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP)
+                Registro.anotar("cabo USB: modo padrão gravado: ${nomeModo(m)}")
+            } catch (e: Exception) { Registro.anotar("cabo USB: não liguei o filtro (${e.javaClass.simpleName})") }
         }
         val f = IntentFilter().apply {
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
@@ -172,6 +229,7 @@ object CaboUsb {
                         anotar("soltou", d)
                         synchronized(this@CaboUsb) { alheios.remove(d.deviceName); tentativas.remove(d.deviceName) }
                         CaboCelular.soltouCabo(d.deviceName)
+                        AndroidAuto.soltouCabo(d.deviceName)
                     }
                     ACAO_PERMISSAO -> {
                         val ok = i.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
@@ -211,7 +269,8 @@ object CaboUsb {
             val primeiraVez = SystemClock.elapsedRealtime() - trocouEm < 90_000
             if (!respondeu && (n > 4 || (!primeiraVez && n > 1))) {
                 alheios.add(nome)
-                aviso = "o celular não respondeu pelo cabo (o ZLink/Android Auto pegou o cabo?)"
+                aviso = if (modo(ctx) == MODO_AA) "o Android Auto do celular não respondeu pelo cabo (o ZLink pegou o cabo?)"
+                    else "o celular não respondeu pelo cabo (o ZLink/Android Auto pegou o cabo?)"
                 Registro.anotar("cabo USB: $aviso Sigo pela rede Bluetooth até o cabo ser solto.")
                 return
             }
@@ -274,15 +333,16 @@ object CaboUsb {
         ultimoTratado = d.deviceName; ultimoTratadoEm = agora
         Thread({
             try {
+                val aa = modo(ctx) == MODO_AA
                 if (ehAcessorio(d)) {
                     val canal = abrir(um, d)
                     if (canal != null) {
-                        Registro.anotar("cabo USB: canal aberto com o celular (${d.productName ?: hex(d)})")
-                        CaboCelular.entregarCabo(canal)
+                        Registro.anotar("cabo USB: canal aberto com o celular (${d.productName ?: hex(d)}) para o " + if (aa) "Android Auto" else "app do celular")
+                        if (aa) AndroidAuto.entregarCabo(ctx, canal) else CaboCelular.entregarCabo(canal)
                     } else Registro.anotar("cabo USB: não abri o acessório (outro app, como o ZLink, pegou antes?)")
-                } else if (trocarParaAcessorio(um, d)) {
+                } else if (trocarParaAcessorio(um, d, if (aa) TEXTOS_AA else TEXTOS)) {
                     trocouEm = SystemClock.elapsedRealtime()
-                    Registro.anotar("cabo USB: pedi o modo acessório ao ${hex(d)}; ele vai voltar como 18d1:2d00")
+                    Registro.anotar("cabo USB: pedi o modo acessório ao ${hex(d)} (" + (if (aa) "identidade Android Auto" else "identidade Painel ASX") + "); ele vai voltar como 18d1:2d00")
                 }
             } catch (e: Exception) {
                 Registro.anotar("ERRO cabo USB: ${e.javaClass.simpleName}: ${e.message}")
@@ -296,7 +356,7 @@ object CaboUsb {
         val n = p.getInt("cabo_pedidos", 0)
         if (n >= MAX_PEDIDOS) {
             if (aviso.isEmpty() || !aviso.startsWith("sem permissão")) {
-                aviso = "sem permissão do cabo: desligue e ligue o interruptor do cabo e marque \"usar por padrão\""
+                aviso = "sem permissão do cabo: escolha o modo do cabo de novo e marque \"usar por padrão\""
                 Registro.anotar("cabo USB: $aviso (não pergunto mais sozinho)")
             }
             return
@@ -309,15 +369,15 @@ object CaboUsb {
     }
 
     /** Celular normal -> modo acessório (AOA 51/52/53). */
-    private fun trocarParaAcessorio(um: UsbManager, d: UsbDevice): Boolean {
+    private fun trocarParaAcessorio(um: UsbManager, d: UsbDevice, textos: Array<String>): Boolean {
         val c = um.openDevice(d) ?: return false
         try {
             val b = ByteArray(2)
             val n = c.controlTransfer(0xC0, 51, 0, 0, b, 2, 1000)
             val versao = if (n == 2) (b[0].toInt() and 0xFF) or ((b[1].toInt() and 0xFF) shl 8) else 0
             if (versao < 1) { Registro.anotar("cabo USB: ${hex(d)} não aceita o modo acessório (n=$n)"); return false }
-            for (i in TEXTOS.indices) {
-                val dados = (TEXTOS[i] + "\u0000").toByteArray(Charsets.UTF_8)
+            for (i in textos.indices) {
+                val dados = (textos[i] + "\u0000").toByteArray(Charsets.UTF_8)
                 if (c.controlTransfer(0x40, 52, 0, i, dados, dados.size, 1000) < 0) return false
             }
             return c.controlTransfer(0x40, 53, 0, 0, null, 0, 1000) >= 0
@@ -397,7 +457,7 @@ object CaboUsb {
     fun diagnostico(ctx: Context): String {
         val sb = StringBuilder()
         val pm = ctx.packageManager
-        sb.append("interruptor: cabo do ").append(if (usarCabo(ctx)) "Painel ASX (padrão)" else "Android Auto").append('\n')
+        sb.append("modo do cabo: ").append(nomeModo(modo(ctx))).append(if (modo(ctx) == MODO_AA) " (padrão)" else "").append('\n')
         sb.append("pedidos de permissão seguidos: ").append(CaboCelular.prefs(ctx).getInt("cabo_pedidos", 0)).append(" de ").append(MAX_PEDIDOS)
             .append(if (aviso.isNotEmpty()) " · aviso: $aviso" else "").append('\n')
         sb.append("filtro USB do Painel (alias): ").append(
@@ -465,8 +525,8 @@ object CaboUsb {
 }
 
 /**
- * Tela invisível (fase 2): o Android a abre quando o celular é plugado e o filtro USB do Painel está ligado
- * (interruptor "Cabo: Painel ASX"). Entrega o aparelho e fecha na hora.
+ * Tela invisível: o Android a abre quando o celular é plugado e o filtro USB do Painel está ligado
+ * (modo do cabo "Android Auto pelo Painel" ou "app do celular"). Entrega o aparelho e fecha na hora.
  */
 class CaboActivity : Activity() {
     override fun onCreate(b: Bundle?) {
