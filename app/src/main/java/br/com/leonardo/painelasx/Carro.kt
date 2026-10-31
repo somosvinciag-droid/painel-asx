@@ -67,6 +67,7 @@ object Carro {
     fun posicao(l: Location) {
         val ctx = appCtx ?: return
         ultimaPosicao = l
+        try { Navegacao.posicao(l) } catch (e: Exception) { Registro.anotar("ERRO mapa: ${e.javaClass.simpleName}: ${e.message}") }
         val agora = System.currentTimeMillis()
         val kmh = if (l.hasSpeed()) l.speed * 3.6 else 0.0
         velocidadeKmh = kmh

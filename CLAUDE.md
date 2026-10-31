@@ -344,3 +344,40 @@ Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica
 - Volume/latência do som pelo `AudioTrack` nesta central; convivência do foco de áudio com o Jarvis e o ouvido.
 - Se o volante (MediaSession) chega ao celular e se o Google Maps manda a navegação nova (0x8006/0x8007) ou a antiga.
 - Se o "Ok Google" do celular funciona com a central dizendo "moto".
+
+## Mapa próprio (rascunho `rascunho-mapa`)
+
+Mapa e rotas NOSSOS (OpenStreetMap), sem Google e sem internet na central. Decisão e fontes em
+`scratchpad/mapa/decisao.md` (fora do repo). Desenho aprovado: prancheta "Mapa do Painel ASX" (3D blocos brancos / 2D).
+- **Sem biblioteca**: desenho próprio em OpenGL ES 2.0 (`MapaDesenho`), roteador A* próprio (`Roteador` em `MapaRota.kt`),
+  frases próprias (`MapaFrases`), guia (`MapaGuia`) e busca (`MapaBusca`). MapLibre foi descartado (+3–4 MB por ABI,
+  AndroidX/OkHttp, exige GLES 3; o app tem ~1 MB). GraphHopper largou o Android; Valhalla/Ferrostar/BRouter pesados ou outro app.
+- **Pacote da região** `regiao.bin` (um arquivo, memória mapeada, little-endian, formato v1 descrito em
+  `ferramentas/mapa/gerar_mapa.py` e lido por `MapaDados`): nós/arestas (mão de direção), vias (classe, velocidade,
+  terra, rotatória, nome), pontos, grade de 500 m, prédios (telhado já triangulado, altura do OSM ou 4,5–8 m),
+  nomes, lugares (cidade/bairro) e índice de ruas por cidade. Coordenadas em decímetros numa projeção plana.
+- **Workflow `mapa.yml`**: SÓ quando o próprio arquivo muda (ou à mão). Geofabrik `sudeste` → `osmium extract`
+  (caixa `CAIXA`, hoje Sul de Minas lon −47..−44, lat −23..−21) → `gerar_mapa.py` → release FIXA **`mapa-1`**
+  (`--prerelease --latest=false`, NUNCA latest) com `mapa.json` (versão, tamanho, sha-256, contagens, prédios de Caxambu)
+  e `regiao.bin.gz`. Para gerar de novo: subir `VERSAO_MAPA` (a central vê a versão nova no `mapa.json` 1×/dia).
+- **Download** (`MapaPacote`): uma vez, sozinho, 4 min depois do início (nunca na partida), quando a internet volta
+  (conector/despertador), ao abrir o mapa ou pedir rota. `Arquivo.baixar` (continua de onde parou) → gunzip com sha-256 →
+  troca atômica → `files/mapa/ok`. Estado no conector: campo `mapa`.
+- **Rotas** (`Rotas.navegar` → `Navegacao`): padrão = mapa do Painel (`Config.rotasNoPainel`, prefs `rotas_painel`).
+  Destino: favorito com coordenadas → "lat,lon" → busca offline → Nominatim (se houver internet). Sem pacote, destino
+  fora da região ou sem caminho → Waze/Maps como antes (`Rotas.navegarFora`, que também liga o aviso de chegada do `Carro`).
+  Comandos: "rota para…", "vamos pra casa", "quanto falta", "cancela a rota", "abre o mapa", "mapa 2D/3D",
+  "rotas no Waze" / "rotas no Painel". Na `MainActivity`: cartão "Mapa do Painel" (abrir + interruptor).
+- **Guia**: GPS do `Carro.posicao` → `Navegacao.posicao` (continua falando com a tela fechada). Avisos com a voz do
+  Jarvis (`Voz.Tipo.IMPORTANTE`): longe (1–2 km só na estrada), perto (~14 s antes) e agora (~5 s), "e depois…",
+  "Siga na X por N km", rotatória com a n-ésima saída, paradas, chegada (encerra a rota 45 s depois).
+  Saiu da rota (>35–80 m conforme a precisão, 3 leituras seguidas, ou contramão) → "Recalculando." (máx. 1 a cada 8 s).
+- **Tela** `TelaMapa` (mesma tarefa da TelaCarro; só abre quando pedida). 30 fps só enquanto mexe (senão ~1 quadro/s),
+  células de 500 m montadas na linha "mapa-carga" (máx. 3 sobem por quadro), névoa no limite carregado, rótulos das ruas
+  em Canvas por cima. Ao sair (`onStop`) solta a placa de vídeo, as células e (sem rota) o pacote. Registro anota
+  "mapa: GPU …" (GL_RENDERER) na primeira abertura. Não mexe na TelaCarro, na saudação nem na voz.
+- **Testes JVM** (fora do repo): `scratchpad/mapa/teste/rodar.sh` — cidade falsa em OSM XML (grade, mão única,
+  rotatória de 4 braços, estrada só com `ref`, rua de terra, rua privada, ilha, prédio em L) → gerador → 74 testes:
+  pacote, frases, curvas, mão única, rotatória 1ª/2ª/3ª saída, guia falando até chegar, saiu da rota, recalcular,
+  paradas, busca; e uma grade de 62 500 cruzamentos para medir o A*.
+- **Dados © colaboradores do OpenStreetMap (ODbL)**: a release cita a fonte; manter a atribuição se houver tela "sobre".

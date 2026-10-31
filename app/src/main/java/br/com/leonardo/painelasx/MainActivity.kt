@@ -366,6 +366,14 @@ class MainActivity : Activity() {
             setOnClickListener { executar("onde está o carro") }
         }, alto())
 
+        // Mapa do Painel (mapa e rotas nossas, sem internet)
+        val mapa = cartao(direita, "Mapa do Painel")
+        mapa.addView(rotulo("O mapa da região baixa sozinho uma vez. Desligado: as rotas abrem no Waze, como antes."))
+        mapa.addView(botao("🗺  Abrir o mapa", BOTAO, TEXTO, 16f).apply { setOnClickListener { TelaMapa.abrir(this@MainActivity) } }, alto())
+        mapa.addView(interruptor("Abrir as rotas no mapa do Painel", Config.rotasNoPainel(this)) {
+            Config.mudarRotasNoPainel(this, it)
+        })
+
         // Rotina
         val rotina = cartao(direita, "Quando o carro ligar")
         rotina.addView(interruptor("Rodar a rotina sozinho", Rotina.ligada(this)) {

@@ -489,10 +489,23 @@ def main():
         f.write(cab)
         for s in secoes:
             f.write(s)
+    # contagem de prédios em caixas pedidas: CONTAR="Caxambu:-44.99,-22.03,-44.88,-21.93;Outra:..."
+    contagem = {}
+    for item in filter(None, os.environ.get("CONTAR", "").split(";")):
+        nome, caixa = item.split(":")
+        lo1, la1, lo2, la2 = (float(v) for v in caixa.split(","))
+        n = 0
+        for _, pts, _ in h.predios:
+            lo = sum(q[0] for q in pts) / len(pts)
+            la = sum(q[1] for q in pts) / len(pts)
+            if lo1 <= lo <= lo2 and la1 <= la <= la2:
+                n += 1
+        contagem[nome] = n
     info = {
         "formato": 1, "versao": versao, "tamanho": pos, "lat0": lat0, "lon0": lon0,
         "nos": nN, "arestas": len(arestas), "vias": len(vias), "pontos": len(pontos) // 2,
         "predios": len(pred), "nomes": len(lista_nomes), "lugares": len(lug), "ruas": len(ruas),
+        "predios_na_caixa": contagem,
     }
     with open(saida + ".json", "w") as f:
         json.dump(info, f, ensure_ascii=False)

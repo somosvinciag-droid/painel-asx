@@ -79,6 +79,8 @@ class AcordaJob : JobService() {
         Registro.iniciar(this)
         Despertador.talvezAcordou(this, "internet voltou")
         try { Ouvido.internetVoltou() } catch (_: Exception) { }
+        // o mapa da região não baixa na partida (só depois de 4 min do início do app)
+        if (android.os.SystemClock.elapsedRealtime() - App.inicio > 4 * 60_000L) try { MapaPacote.talvezBaixar(this, "internet voltou") } catch (_: Exception) { }
         return false
     }
 

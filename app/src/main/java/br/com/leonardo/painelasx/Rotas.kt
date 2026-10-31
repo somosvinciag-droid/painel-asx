@@ -5,6 +5,9 @@ import android.content.Intent
 import android.net.Uri
 
 /**
+ * Pedidos de rota. Padrão: o MAPA DO PAINEL (Navegacao: mapa e rotas nossas, sem internet).
+ * Se o Leonardo escolher "rotas no Waze", ou o mapa da região ainda não estiver baixado, ou o destino
+ * não estiver no mapa, vai como antes:
  * "rota para Pouso Alegre"                    -> Waze já navegando.
  * "rota para Caxambu, Pouso Alegre, Caxambu"  -> Google Maps com as paradas em ordem
  *                                                (o Waze não aceita paradas vindas de outro app).
@@ -57,7 +60,20 @@ object Rotas {
         false
     }
 
-    fun navegar(ctx: Context, destinos: List<String>): String {
+    /** [destinos]: endereços; [nomes]: o que ele falou ("mineirita", "casa"), na mesma ordem. */
+    fun navegar(ctx: Context, destinos: List<String>, nomes: List<String> = destinos): String {
+        if (Config.rotasNoPainel(ctx)) {
+            Navegacao.iniciar(ctx, nomes, destinos)?.let { return it }
+            Registro.anotar("rota: ${MapaPacote.explicacao()}; vai pelo Waze")
+            return MapaPacote.explicacao() + ". " + navegarFora(ctx, destinos, nomes)
+        }
+        return navegarFora(ctx, destinos, nomes)
+    }
+
+    /** Pelo Waze / Google Maps (o jeito de antes). O Carro avisa a chegada. */
+    fun navegarFora(ctx: Context, destinos: List<String>, nomes: List<String> = destinos): String {
+        val ultimo = nomes.lastOrNull() ?: destinos.last()
+        Carro.definirDestino(Lugares.achar(ctx, ultimo)?.first ?: ultimo, destinos.last())
         val enc = destinos.map { Uri.encode(it) }
         Registro.anotar("rota: ${destinos.joinToString(" → ")}")
         if (destinos.size == 1) {

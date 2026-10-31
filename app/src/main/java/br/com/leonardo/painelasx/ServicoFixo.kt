@@ -80,6 +80,10 @@ class ServicoFixo : Service() {
             medirInicio("lugares") { Lugares.iniciar(app) }
             medirInicio("leitor do carro") { LeitorCarro.iniciar(app) }
         }, "inicio").start()
+        // Mapa da região: baixa (uma vez) ou confere versão nova só 4 min depois, longe da partida e da saudação.
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            try { MapaPacote.talvezBaixar(app, "início") } catch (_: Exception) { }
+        }, 4 * 60_000L)
         try {
             registerReceiver(desligando, android.content.IntentFilter(Intent.ACTION_SHUTDOWN))
         } catch (_: Exception) {

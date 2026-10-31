@@ -11,6 +11,12 @@ object Config {
     fun limite(ctx: Context) = p(ctx).getInt("limite", 110)
     fun mudarLimite(ctx: Context, v: Int) = p(ctx).edit().putInt("limite", v.coerceIn(30, 200)).apply()
 
+    // Mapa do Painel: rotas no mapa próprio (padrão) ou no Waze; vista 3D (padrão) ou 2D
+    fun rotasNoPainel(ctx: Context) = p(ctx).getBoolean("rotas_painel", true)
+    fun mudarRotasNoPainel(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("rotas_painel", v).apply()
+    fun mapa3d(ctx: Context) = p(ctx).getBoolean("mapa_3d", true)
+    fun mudarMapa3d(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("mapa_3d", v).apply()
+
     // Avisos no celular (ntfy): um "canal" secreto só dele
     fun topicoNtfy(ctx: Context): String {
         val atual = p(ctx).getString("ntfy", null)

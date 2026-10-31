@@ -78,6 +78,17 @@
             </intent-filter>
         </activity>
 
+        <!-- Mapa do Painel (mapa e rotas próprias, sem internet). Só abre quando pedido. -->
+        <activity
+            android:name=".TelaMapa"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:excludeFromRecents="true"
+            android:taskAffinity="br.com.leonardo.painelasx.carro"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
+
         <activity
             android:name=".TodosApps"
             android:exported="false"

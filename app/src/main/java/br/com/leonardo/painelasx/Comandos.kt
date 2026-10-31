@@ -23,7 +23,8 @@ object Comandos {
         "\"resumo do dia\", \"resumo da semana\", \"tela do carro\", \"backup\"",
         "\"abre a câmera\" / \"câmera de ré\"",
         "\"abre o Spotify\", \"abre o Waze\", \"abre o rádio\"… (qualquer app pelo nome)",
-        "\"rota para Pouso Alegre\" (Waze) / \"rota para Caxambu, Pouso Alegre, Caxambu\" (Maps com paradas)",
+        "\"rota para Pouso Alegre\" / \"rota para Caxambu, Pouso Alegre, Caxambu\" (mapa do Painel, sem internet)",
+        "\"quanto falta\", \"cancela a rota\", \"abre o mapa\", \"mapa 2D\" / \"mapa 3D\", \"rotas no Waze\" / \"rotas no Painel\"",
         "\"volume 50\", \"aumenta o volume\", \"abaixa o volume\", \"silêncio\"",
         "\"próxima\", \"anterior\", \"pausa\", \"continua\"",
         "\"tela inicial\", \"voltar\"",
@@ -86,6 +87,9 @@ object Comandos {
             return Lugares.salvar(ctx, it.groupValues[3], end)
         }
         if (t == "favoritos" || t == "meus favoritos" || t.startsWith("quais sao os favoritos")) return Lugares.texto(ctx)
+
+        // Mapa do Painel (rotas nossas, sem internet)
+        mapa(ctx, t)?.let { return it }
 
         // Música / rádio
         if (t.startsWith("para o radio") || t.startsWith("desliga o radio") || t == "para a radio" || t.startsWith("desliga a radio")) {
@@ -238,6 +242,33 @@ object Comandos {
             (if (!r.isNull("nota_media")) ", nota média ${r.optInt("nota_media")}." else ".")
     }
 
+    /** Mapa do Painel: cancelar, quanto falta, abrir, 2D/3D, Waze ou Painel. null = não é do mapa. */
+    private fun mapa(ctx: Context, t: String): String? {
+        if (Regex("^(cancela|cancelar|encerra|encerrar|para|parar|termina|terminar|desliga|fecha|finaliza)( a| o)? (rota|navegacao|gps)\\b").containsMatchIn(t))
+            return Navegacao.encerrar()
+        if (Regex("^(quanto falta|falta muito|que horas (eu )?chego|quando (eu )?chego|quanto tempo falta|quantos km faltam|quantos quilometros faltam)").containsMatchIn(t))
+            return Navegacao.resumoFalado()
+        if (Regex("^(usa|usar|usar o|abre|abrir|coloca|poe|bota|manda|quero)? ?(as )?rotas? (no|pelo|pelo o|com o) waze$").matches(t) || t == "usar o waze nas rotas") {
+            Config.mudarRotasNoPainel(ctx, false)
+            return "Certo: as rotas vão abrir no Waze."
+        }
+        if (Regex("^(usa|usar|abre|abrir|coloca|poe|bota|manda|quero)? ?(as )?rotas? (no|pelo|com o) (painel|mapa|mapa do painel|nosso mapa)$").matches(t)) {
+            Config.mudarRotasNoPainel(ctx, true)
+            return "Certo: as rotas vão abrir no mapa do Painel."
+        }
+        if (Regex("^(mapa|o mapa) ?(2d|dois d|de cima)$").matches(t) || t == "mapa em 2d" || t == "mapa visto de cima") {
+            Config.mudarMapa3d(ctx, false); TelaMapa.abrir(ctx); return "Mapa visto de cima."
+        }
+        if (Regex("^(mapa|o mapa) ?(3d|tres d)$").matches(t) || t == "mapa em 3d") {
+            Config.mudarMapa3d(ctx, true); TelaMapa.abrir(ctx); return "Mapa em 3D."
+        }
+        if (Regex("^(abre|abrir|mostra|mostrar|volta|voltar)( o| pro| para o| ao)? (mapa|mapa do painel|nosso mapa|navegacao)$").matches(t) || t == "mapa") {
+            TelaMapa.abrir(ctx)
+            return if (MapaPacote.pronto(ctx)) "Abrindo o mapa." else MapaPacote.explicacao() + "."
+        }
+        return null
+    }
+
     /** Os comandos de antes (v13). null = não entendeu. */
     private fun executarComandos(ctx: Context, t: String, falado: String, ctl: Controle?): String? {
         // Viagens e onde o carro está
@@ -261,9 +292,7 @@ object Comandos {
                 ?.let { n -> if (Lugares.achar(ctx, n) != null) listOf(n) else null }
         if (pedidos != null) {
             val enderecos = pedidos.map { Lugares.achar(ctx, it)?.second?.optString("endereco")?.ifBlank { null } ?: it }
-            val ultimo = pedidos.last()
-            Carro.definirDestino(Lugares.achar(ctx, ultimo)?.first ?: ultimo, enderecos.last())
-            return Rotas.navegar(ctx, enderecos)
+            return Rotas.navegar(ctx, enderecos, pedidos)
         }
 
         // Camera de re

@@ -132,6 +132,7 @@ object Conector {
                 val r = pedir("GET", "/app/comandos", null, leituraMs = 35_000)
                 if (r.first != 200) throw Exception("comandos deu ${r.first}")
                 if (!online) try { Ouvido.internetVoltou() } catch (_: Exception) { }
+                if (!online) try { MapaPacote.talvezBaixar(ctx, "internet voltou") } catch (_: Exception) { }
                 online = true
                 ultimoErro = ""
                 espera = 3000L
@@ -174,6 +175,8 @@ object Conector {
         .put("celular", Celular.estadoConector())
         // Receptor de Android Auto pelo cabo (só o estado; nada de nomes ou mensagens).
         .put("android_auto", AndroidAuto.estadoConector())
+        // Mapa do Painel (pacote da região e rota em andamento)
+        .put("mapa", try { Navegacao.estadoConector(ctx) } catch (_: Exception) { JSONObject() })
 
     private fun executar(ctx: Context, c: JSONObject) {
         val id = c.optString("id")
