@@ -128,3 +128,15 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
 - Teste com voz sintética: o base erra palavras curtas ("rota" -> "poto"); frases longas saem bem. O tiny era pior. Ajustar com
   o que aparecer no registro ("ouvido: \"…\"").
 - Possível conflito: o assistente de fábrica (com.txznet.txz) pode segurar o microfone; o registro avisa "microfone parece mudo".
+
+## v22: revisão, saudação instantânea e partida leve
+
+- Revisão por agente (ramo `rascunho-revisao`): ouvido não derruba o app com arquivo cortado (tamanho conferido, marcador
+  "carregando"), VAD com janelas de 512, `Corretor.kt` (palavras que o Whisper troca: "poto"->rota, cachambu->Caxambu...),
+  Fila sem travar a tela, gravações atômicas (viagens, registro, voz), `Arquivo.baixar` com continuação (ouvido, voz, APK),
+  Atualizador confere o APK, Jarvis não sauda 2 vezes (`saudou_em` + BOOT_COUNT), "chegando em casa" só depois de >2 km.
+- Saudação: `App.onCreate` -> `Jarvis.talvezPartidaNoInicio` (primeira coisa do processo); inicialização pesada fora da
+  linha principal; o registro mede cada etapa ("inicio: … ms", "jarvis: carro ligou (X ms…)").
+- Ouvido pré-carrega só depois da saudação e >= 20 s do início. Partida sem "Iron Man" (`musica_entrada_v2`, padrão desligado).
+- `Partida.kt`: "--- abriu na partida ---" no diagnóstico (UsageStats; o Leonardo liga "Acesso ao uso" uma vez).
+- Pendente (decisão do Leonardo): saudar de novo depois de uma soneca curta (< 2 min) da central — hoje sauda.
