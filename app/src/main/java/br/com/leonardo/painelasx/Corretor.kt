@@ -153,8 +153,22 @@ object Corretor {
         val f = melhor ?: return null
         // As que começam com palavra de comando livre ("toca…", "abre…") precisam ser quase iguais.
         val minimo = if (COMECOS_LIVRES.containsMatchIn(n)) 0.86 else 0.75
-        return if (r1 >= minimo && r1 - r2 >= 0.05) f else null
+        if (r1 < minimo || r1 - r2 < 0.05) return null
+        return if (naoApagaPalavraProtegida(palavras, normalizar(f).split(" "))) f else null
     }
+
+    /**
+     * Palavras de verdade que lembram as dos comandos fixos, mas querem dizer outra coisa:
+     * "troquei o pneu" não é "troquei o óleo"; "fala mais baixo" não é "fala mais rápido".
+     */
+    private val PROTEGIDAS = setOf(
+        "pneu", "pneus", "estepe", "freio", "freios", "filtro", "bateria", "correia", "pastilha", "pastilhas", "vela", "velas",
+        "baixo", "baixa", "alto", "alta"
+    )
+
+    /** A frase só é trocada se nenhuma das [PROTEGIDAS] for sumir dela. */
+    private fun naoApagaPalavraProtegida(ditas: List<String>, fixa: List<String>): Boolean =
+        ditas.none { it in PROTEGIDAS && it !in fixa }
 
     // ------------------------------------------------------------------ lugares
 
