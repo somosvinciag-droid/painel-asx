@@ -68,6 +68,7 @@ class TelaCarro : Activity() {
 
     private lateinit var hora: TextView
     private lateinit var clima: TextView
+    private lateinit var celularBateria: TextView
     private lateinit var velocidade: TextView
     private lateinit var barra: BarraVelocidade
     private lateinit var limite: TextView
@@ -213,6 +214,9 @@ class TelaCarro : Activity() {
         topo.addView(texto("ASX GT", 22f, TEXTO, forte, 0.5f).apply {
             setOnLongClickListener { startActivity(Intent(this@TelaCarro, MainActivity::class.java)); true }
         }, lp(0, WRAP, 1f))
+        // Bateria do celular (só aparece com o app "Painel ASX Celular" ligado).
+        celularBateria = texto("", 18f, CINZA, normal, 0.1f).apply { visibility = View.GONE }
+        topo.addView(celularBateria, lp(WRAP, WRAP).apply { rightMargin = px(18) })
         clima = texto("—", 20f, CINZA, normal)
         topo.addView(clima, lp(WRAP, WRAP).apply { rightMargin = px(18) })
         hora = texto("--:--", 28f, TEXTO, normal)
@@ -350,11 +354,16 @@ class TelaCarro : Activity() {
             ctrl.addView(f, lp(0, px(80), 1f).apply { if (ctrl.childCount > 0) leftMargin = px(8) })
             return ic
         }
-        botao(Icone.ANTERIOR, false) { Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_PREVIOUS) }
-        playIcone = botao(Icone.PAUSA, true) {
-            if (!Musica.pararRadio()) Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+        // Com o celular ligado, o controle vai direto para ele; senão, a tecla de mídia de sempre.
+        botao(Icone.ANTERIOR, false) {
+            if (!Celular.controle("anterior")) Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_PREVIOUS)
         }
-        botao(Icone.PROXIMA, false) { Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_NEXT) }
+        playIcone = botao(Icone.PAUSA, true) {
+            if (!Musica.pararRadio() && !Celular.controle("alternar")) Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+        }
+        botao(Icone.PROXIMA, false) {
+            if (!Celular.controle("proxima")) Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_NEXT)
+        }
         dir.addView(ctrl, lp(MATCH, px(80)).apply { topMargin = px(14) })
 
         anjo.visibility = if (Musica.podeVerMusica(this)) View.GONE else View.VISIBLE
@@ -398,6 +407,9 @@ class TelaCarro : Activity() {
             }
         }
         if (tique % 5 == 0) {
+            val cel = Celular.bateriaCurta()
+            celularBateria.por(cel)
+            celularBateria.visibility = if (cel.isEmpty()) View.GONE else View.VISIBLE
             clima.por(Clima.curto())
             val kml = Diario.consumoMedio(this)
             consumo.por(kml?.let { "%.1f".format(BR, it) + " km/l" } ?: "— km/l")
@@ -433,6 +445,27 @@ class TelaCarro : Activity() {
     // ---------------------------------------------------------------- voz
 
     private fun ouvir() {
+        if (Ouvido.ouvindo || Celular.ouvindo) return
+        // Celular ligado: ele ouve (Google, pt-BR) e manda o texto. Erro ou 8 s sem resposta: ouvido da central.
+        val pediu = Celular.ouvir({ etapa ->
+            estadoJarvis.text = "JARVIS · $etapa"
+            estadoJarvis.setTextColor(VERMELHO)
+        }) { texto, _ ->
+            estadoJarvis.setTextColor(CINZA)
+            if (texto != null) {
+                estadoJarvis.text = "OUVI: " + texto.uppercase().take(42)
+                relogio.postDelayed({ if (!Ouvido.ouvindo && !Celular.ouvindo) estadoJarvis.text = "JARVIS" }, 8000)
+                executar(texto)
+            } else {
+                estadoJarvis.text = "JARVIS"
+                ouvirNaCentral()
+            }
+        }
+        if (!pediu) ouvirNaCentral()
+    }
+
+    /** Ouvido da própria central (como antes do celular). */
+    private fun ouvirNaCentral() {
         if (Ouvido.ouvindo) return
         // Ouvido próprio (sem internet). Se ainda não baixou e a central tiver o app Google, usa o do Google.
         if (!Ouvido.baixado(this) && reconhecedorDoAndroid()) { ouvirPeloAndroid(); return }
@@ -464,7 +497,7 @@ class TelaCarro : Activity() {
         if (codigo != Ouvido.PEDIDO_MIC) return
         if (resultados.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
             Registro.anotar("ouvido: microfone liberado")
-            relogio.postDelayed({ ouvir() }, 400)
+            relogio.postDelayed({ ouvirNaCentral() }, 400)
         } else Voz.falar("Sem o microfone eu não consigo ouvir, senhor.")
     }
 

@@ -42,6 +42,12 @@ object Diagnostico {
             SUSPEITOS.any { s -> partes.any { it == s || (s.length > 3 && it.contains(s)) } }
         }.forEach { sb.append(it).append('\n') }
 
+        sb.append("\n--- celular ---\n")
+        sb.append(try { Celular.diagnostico(ctx) } catch (e: Exception) { "(não consegui ler: ${e.javaClass.simpleName})\n" })
+
+        sb.append("\n--- cabo USB ---\n")
+        sb.append(try { CaboUsb.diagnostico(ctx) } catch (e: Exception) { "(não consegui ler: ${e.javaClass.simpleName})\n" })
+
         sb.append("\n--- abriu na partida ---\n")
         sb.append(try { Partida.texto(ctx) } catch (e: Exception) { "(não consegui ler: ${e.javaClass.simpleName})\n" })
 

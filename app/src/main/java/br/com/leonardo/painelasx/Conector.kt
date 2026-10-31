@@ -170,6 +170,8 @@ object Conector {
         .put("voz_propria", VozPropria.estado)
         .put("ouvido", Ouvido.estado)
         .put("microfone_liberado", Ouvido.temPermissao(ctx))
+        // Celular (app Painel ASX Celular): só o estado; nunca texto de mensagem.
+        .put("celular", Celular.estadoConector())
 
     private fun executar(ctx: Context, c: JSONObject) {
         val id = c.optString("id")

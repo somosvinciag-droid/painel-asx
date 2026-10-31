@@ -199,6 +199,8 @@ object Musica {
 
     fun tocando(ctx: Context): Tocando? {
         radioTocando?.let { return Tocando(it, "Rádio online", null, 0, 0, true, "RÁDIO") }
+        // Celular ligado (app Painel ASX Celular): a música dele vem primeiro, com a capa.
+        Celular.tocando()?.let { return it }
         if (!podeVerMusica(ctx)) return null
         return try {
             val (s, m) = sessaoAtual(ctx) ?: return null
@@ -226,6 +228,7 @@ object Musica {
     /** "Música — Artista" do app que está tocando agora, ou null. */
     fun tocandoAgora(ctx: Context): String? {
         radioTocando?.let { return "📻 $it" }
+        Celular.tituloAgora()?.let { return it }
         if (!podeVerMusica(ctx)) return null
         return try {
             val m = sessaoAtual(ctx)?.second ?: return null
