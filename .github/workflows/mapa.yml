@@ -1,0 +1,107 @@
+name: Preparar o mapa da região (mapa próprio)
+
+# Gera o pacote do mapa próprio do Painel ASX (ruas, rotas, prédios e busca, SEM internet na central)
+# a partir do OpenStreetMap (Geofabrik "sudeste", © colaboradores do OpenStreetMap, ODbL)
+# e guarda na release FIXA "mapa-1" (pré-lançamento: NUNCA vira a "latest" que o Atualizador lê).
+# Roda sozinho SÓ quando este arquivo muda (para gerar de novo: suba VERSAO_MAPA), ou quando pedido.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/mapa.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  mapa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSAO_MAPA: 1
+      # Sul de Minas com folga (lon_min,lat_min,lon_max,lat_max): Caxambu, Poços, Pouso Alegre, Varginha, Lavras, Extrema
+      CAIXA: "-47.0,-23.0,-44.0,-21.0"
+      LAT0: "-22.0"
+      LON0: "-45.5"
+      CONTAR: "Caxambu (área urbana):-44.955,-22.000,-44.905,-21.955;Caxambu (município, caixa):-45.000,-22.040,-44.860,-21.920"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Ferramentas
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osmium-tool
+          pip install -q "osmium==4.3.2"
+          osmium --version | head -1
+
+      - name: Baixar o OpenStreetMap (Sudeste) e recortar a região
+        run: |
+          set -euo pipefail
+          mkdir -p w sai
+          curl -fsSL --retry 5 --retry-delay 10 -o w/sudeste.osm.pbf \
+            https://download.geofabrik.de/south-america/brazil/sudeste-latest.osm.pbf
+          ls -la w/sudeste.osm.pbf
+          osmium extract -b "$CAIXA" --strategy smart -o w/caixa.osm.pbf w/sudeste.osm.pbf
+          rm w/sudeste.osm.pbf
+          osmium tags-filter w/caixa.osm.pbf w/highway w/building n/place -o w/regiao.osm.pbf
+          ls -la w/caixa.osm.pbf w/regiao.osm.pbf
+
+      - name: Gerar o pacote
+        run: |
+          set -euo pipefail
+          python3 -I ferramentas/mapa/gerar_mapa.py w/regiao.osm.pbf sai/regiao.bin "$VERSAO_MAPA" "$LAT0" "$LON0"
+          ls -la sai
+
+      - name: Contar os prédios de Caxambu (Overpass, município inteiro)
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          Q='[out:json][timeout:120];area["name"="Caxambu"]["admin_level"="8"]["boundary"="administrative"]->.a;(way["building"](area.a);relation["building"](area.a););out count;'
+          curl -fsS --max-time 180 --data-urlencode "data=$Q" https://overpass-api.de/api/interpreter -o w/overpass.json && cat w/overpass.json || echo '{}' > w/overpass.json
+
+      - name: Compactar e descrever (mapa.json)
+        run: |
+          set -euo pipefail
+          cd sai
+          gzip -9 -k regiao.bin
+          python3 - <<'EOF'
+          import hashlib, json, os, datetime
+          info = json.load(open("regiao.bin.json"))
+          h = hashlib.sha256(open("regiao.bin", "rb").read()).hexdigest()
+          try:
+              ov = json.load(open("../w/overpass.json"))
+              cax = int(ov["elements"][0]["tags"]["total"])
+          except Exception:
+              cax = None
+          info.update({
+              "sha256": h,
+              "gz_tamanho": os.path.getsize("regiao.bin.gz"),
+              "caixa": os.environ["CAIXA"],
+              "caxambu_predios_osm": cax,
+              "gerado_em": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "fonte": "OpenStreetMap (Geofabrik sudeste), ODbL",
+          })
+          json.dump(info, open("mapa.json", "w"), ensure_ascii=False)
+          print(json.dumps(info, ensure_ascii=False, indent=1))
+          msg = (f"pacote v{info['versao']}: {info['gz_tamanho']/1048576:.1f} MB compactado, {info['tamanho']/1048576:.1f} MB instalado; "
+                 f"{info['nos']} cruzamentos, {info['vias']} vias, {info['predios']} prédios, {info['lugares']} lugares, {info['ruas']} ruas na busca; "
+                 f"Caxambu no OSM: {cax} prédios; na caixa: {info.get('predios_na_caixa')}")
+          print(f"::notice title=Mapa da região::{msg}")
+          EOF
+          ls -la
+
+      - name: Guardar na release mapa-1
+        run: |
+          set -euo pipefail
+          cd sai
+          gh release delete mapa-1 -R "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create mapa-1 -R "$GITHUB_REPOSITORY" --prerelease --latest=false \
+            --title "Mapa da região (mapa próprio do Painel ASX)" \
+            --notes "Pacote do Sul de Minas (ruas, rotas, prédios e busca) baixado uma vez pela central. Dados © colaboradores do OpenStreetMap, licença ODbL (openstreetmap.org/copyright)." \
+            mapa.json regiao.bin.gz
