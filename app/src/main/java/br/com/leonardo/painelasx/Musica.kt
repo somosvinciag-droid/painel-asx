@@ -163,5 +163,24 @@ object Musica {
     }
 }
 
-/** Só existe para o Android deixar o app ver o nome da música que está tocando. */
-class Ouvinte : NotificationListenerService()
+/**
+ * "Anjo da guarda" (v19). Além de deixar o app ver a música, este serviço é RELIGADO pelo próprio Android
+ * depois que a central fecha o Painel ASX (o que não acontece com a Acessibilidade). Quando ele volta,
+ * religamos o serviço fixo e, se a central dormiu desde a última saudação, o Jarvis dá as boas-vindas.
+ */
+class Ouvinte : NotificationListenerService() {
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        val app = applicationContext
+        val idade = (android.os.SystemClock.elapsedRealtime() - App.inicio) / 1000
+        Registro.anotar("anjo da guarda: religado pelo sistema (app aberto há ${idade}s)")
+        ServicoFixo.iniciar(app)
+        Thread {
+            val estado = Despertador.estadoMcu()
+            if (estado != "3" && Jarvis.devoSaudar(app)) {
+                Registro.anotar("anjo da guarda: central acordada e ainda sem saudação → Jarvis")
+                Rede.naTela { Voz.iniciar(app); Jarvis.partida(app) }
+            }
+        }.start()
+    }
+}

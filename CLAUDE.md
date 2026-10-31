@@ -90,3 +90,17 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
 - Câmera de ré desta central: pacote `com.nwd.backcar` (pisca na partida; ignorada nos primeiros 45–60 s).
 - Ouvido do "Ei, Jarvis": pacote `ouvido-1` (workflow `ouvido.yml`, KWS gigaspeech 3.3M) já publicado; falta o app.
 - A Acessibilidade (Controle) é desligada pela central em várias partidas: é opcional, sem alerta.
+
+## v19: anjo da guarda e tela inicial
+
+- Causa confirmada: a NWD dá force-stop no app quando a central dorme, e o force-stop APAGA a Acessibilidade (AOSP).
+  O acesso às notificações (`Ouvinte`, NotificationListenerService) NÃO é apagado e o Android o religa sozinho.
+- `Ouvinte.onListenerConnected` ("anjo da guarda"): religa o `ServicoFixo` e, se a central está acordada e
+  `Jarvis.devoSaudar` (dormiu depois da última saudação, ou >10 min sem saudação e sem atualização recente), chama `Jarvis.partida`.
+  Ligar UMA vez: botão "🛡 Ligar o Jarvis voltar sozinho" na tela do carro (ou `adb shell cmd notification allow_listener
+  br.com.leonardo.painelasx/.Ouvinte` pelo notebook).
+- `TelaCarro` tem filtro HOME; botão "★ Fazer do Painel ASX o sistema do carro" pede `persist.nwd.launcher.default` pelo
+  canal da NWD (`Nwd.pedirProp`). `TodosApps` lista os apps e volta para a tela de fábrica (`com.android.launcher`).
+- `Nwd.tecla` aperta voltar/início/volume pela MCU sem Acessibilidade. `Nwd.relatorio` (em `dados_do_carro`, campo "nwd")
+  traz as props do "passo 0" do root (só leitura: ro.debuggable, ro.build.type, verifiedbootstate, treble...) e as regras da NWD.
+- Root/firmware próprio: só com cópia completa + arquivo oficial (.pac); trocar o Android inteiro perde rádio, ré, BT e volante.

@@ -186,6 +186,17 @@ object Comandos {
         if (Regex("(fala|falar|fale|voz) (mais )?(rapido|depressa|ligeiro)").containsMatchIn(t)) return VozPropria.ajustar(ctx, 0f, 0.07f)
         if (Regex("(fala|falar|fale|voz) (mais )?(devagar|lento|calmo)").containsMatchIn(t)) return VozPropria.ajustar(ctx, 0f, -0.07f)
         if (t.contains("voz normal") || t.contains("voz padrao")) return VozPropria.ajustar(ctx, 0f, 0f, padrao = true)
+        if (t.contains("tela de fabrica") || t.contains("sistema de fabrica")) {
+            if (t.startsWith("volta") || t.contains("usar") || t.contains("quero")) {
+                Nwd.pedirProp(ctx, Nwd.PROP_LAUNCHER, Nwd.LAUNCHER_FABRICA)
+                Apps.abrir(ctx, Nwd.LAUNCHER_FABRICA)
+                return "Voltei para a tela de fábrica, senhor. Para me chamar de volta: abra o Painel ASX e toque em Fazer do Painel ASX o sistema do carro."
+            }
+            Apps.abrir(ctx, Nwd.LAUNCHER_FABRICA); return "Abrindo a tela de fábrica."
+        }
+        if (t == "apps" || t == "todos os apps" || t.startsWith("mostra os apps")) {
+            ctx.startActivity(Intent(ctx, TodosApps::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return "Seus apps, senhor."
+        }
         if (t.contains("voz do google") || t.contains("voz do android")) {
             VozPropria.mudarLigada(ctx, false); Voz.reiniciar(ctx); return "Usando a voz do Android."
         }
@@ -283,6 +294,8 @@ object Comandos {
         // Navegar na central (precisa da Acessibilidade)
         if (t.contains("tela inicial") || t == "inicio" || t == "casa" || t == "home") {
             if (ctl?.inicio() == true) return "Tela inicial."
+            Nwd.tecla(ctx, Nwd.INICIO)
+            return "Tela inicial."
             // Sem o Controle: abre a tela inicial do jeito normal do Android.
             return try {
                 ctx.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -290,7 +303,8 @@ object Comandos {
             } catch (e: Exception) { precisaAcessibilidade() }
         }
         if (t == "voltar" || t == "volta") {
-            return if (ctl?.voltar() == true) "Voltei." else precisaAcessibilidade()
+            if (ctl?.voltar() != true) Nwd.tecla(ctx, Nwd.VOLTAR)
+            return "Voltei."
         }
         if (t.startsWith("le a tela") || t.startsWith("ler a tela") || t.startsWith("leia a tela")) {
             if (ctl == null) return precisaAcessibilidade()

@@ -61,6 +61,8 @@ class TelaCarro : Activity() {
     private lateinit var hoje: TextView
     private lateinit var semana: TextView
     private lateinit var aviso: TextView
+    private lateinit var sistema: Button
+    private lateinit var anjo: Button
 
     private val atualizar = object : Runnable {
         override fun run() {
@@ -79,6 +81,30 @@ class TelaCarro : Activity() {
         ServicoFixo.iniciar(this)
         montar()
         tratar(intent)
+        // A central acabou de ligar/acordar e o Android nos abriu como tela inicial: o Jarvis cumprimenta.
+        if (android.os.SystemClock.elapsedRealtime() - App.inicio < 20_000) {
+            Registro.anotar("tela do carro: aberta pelo sistema (central ligou/acordou)")
+            Jarvis.partida(applicationContext)
+        }
+    }
+
+    /** Sendo a tela inicial, o "voltar" não fecha o sistema. */
+    @Deprecated("API antiga")
+    override fun onBackPressed() { }
+
+    private fun virarTelaInicial() {
+        Nwd.pedirProp(this, Nwd.PROP_LAUNCHER, packageName)
+        relogio.postDelayed({
+            if (Nwd.somosTelaInicial(this)) {
+                Voz.falar("Pronto, senhor. Agora eu sou a tela inicial do carro.")
+            } else {
+                // A NWD não aceitou: abre a escolha de tela inicial do Android (marcar Painel ASX e "Sempre").
+                try { startActivity(Intent(android.provider.Settings.ACTION_HOME_SETTINGS)) } catch (_: Exception) {
+                    try { startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { }
+                }
+                Voz.falar("Escolha Painel ASX e toque em Sempre.")
+            }
+        }, 1500)
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -190,9 +216,17 @@ class TelaCarro : Activity() {
         for ((nome, rotulo) in listOf("casa" to "🏠  Casa", "mineirita" to "📍  Mineirita", "familia" to "👨‍👩‍👦  Família")) {
             c3.addView(botao(rotulo, CARTAO, BRANCO, 17f) { executar("rota para $nome") }, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(10) })
         }
-        c3.addView(botao("⚙  Painel", BORDA, CINZA, 15f) {
+        val linhaBaixo = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        linhaBaixo.addView(botao("▦  Apps", BORDA, BRANCO, 15f) { TodosApps.abrir(this) }, LinearLayout.LayoutParams(0, -1, 1f))
+        linhaBaixo.addView(botao("⚙", BORDA, CINZA, 18f) {
             startActivity(Intent(this, MainActivity::class.java))
-        }, LinearLayout.LayoutParams(-1, 0, 0.8f).apply { topMargin = dp(10) })
+        }, LinearLayout.LayoutParams(0, -1, 0.6f).apply { leftMargin = dp(8) })
+        c3.addView(linhaBaixo, LinearLayout.LayoutParams(-1, 0, 0.8f).apply { topMargin = dp(10) })
+        sistema = botao("★  Fazer do Painel ASX o sistema do carro", VERMELHO_ESCURO, BRANCO, 14f) { virarTelaInicial() }
+        c3.addView(sistema, LinearLayout.LayoutParams(-1, 0, 0.7f).apply { topMargin = dp(10) })
+        anjo = botao("🛡  Ligar o Jarvis voltar sozinho", VERMELHO_ESCURO, BRANCO, 14f) { ligarAnjo() }
+        anjo.visibility = if (Musica.podeVerMusica(this)) View.GONE else View.VISIBLE
+        c3.addView(anjo, LinearLayout.LayoutParams(-1, 0, 0.7f).apply { topMargin = dp(10) })
         raiz.addView(c3, lp(0.75f, 14))
     }
 
@@ -219,6 +253,24 @@ class TelaCarro : Activity() {
             semana.text = "${s.optDouble("km_total")} km · ${s.optInt("viagens")} viagens · ${s.optDouble("horas_dirigindo")} h" +
                 (if (!s.isNull("nota_media")) "\nNota média: ${s.optInt("nota_media")}" else "")
             aviso.text = Voz.ultimaFala
+            if (tique % 30 == 0) Rede.emSegundoPlano("tela-inicial") {
+                val ja = Nwd.somosTelaInicial(this)
+                Rede.naTela {
+                    sistema.visibility = if (ja) View.GONE else View.VISIBLE
+                    anjo.visibility = if (Musica.podeVerMusica(this)) View.GONE else View.VISIBLE
+                }
+            }
+        }
+    }
+
+    /** Uma vez só: liga o "acesso às notificações", que o Android religa sozinho depois que a central fecha o app. */
+    private fun ligarAnjo() {
+        Voz.falar("Na próxima tela, ligue o Painel ASX. É uma vez só, senhor.", Voz.Tipo.RESPOSTA)
+        try {
+            startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        } catch (e: Exception) {
+            Registro.anotar("anjo da guarda: tela de ajustes não abriu (${e.javaClass.simpleName})")
+            Voz.falar("Não consegui abrir os ajustes. Peça ao Claude para ligar pelo notebook.", Voz.Tipo.RESPOSTA)
         }
     }
 
