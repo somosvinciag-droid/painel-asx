@@ -56,12 +56,22 @@ object Viagens {
     /** Grava fora da linha principal (o GPS chega na linha principal) e sem cortar o arquivo se a energia cair. */
     private val gravador = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "viagens").apply { isDaemon = true } }
 
-    private fun salvar() {
+    private var ultimaVersao = 0L          // só muda dentro dos métodos @Synchronized
+    @Volatile private var versaoGravada = 0L
+
+    /** [agora] = grava já, nesta linha (fim de viagem: a central pode fechar o app logo depois de dormir). */
+    private fun salvar(agora: Boolean = false) {
         val f = arquivo ?: return
         val texto = try { JSONArray(viagens.takeLast(MAX_VIAGENS)).toString() } catch (_: Exception) { return }
-        gravador.execute {
-            try { Arquivo.gravarSeguro(f, texto) } catch (e: Exception) { Registro.anotar("ERRO viagens: não gravei (${e.javaClass.simpleName})") }
+        val numero = ++ultimaVersao
+        val gravar = Runnable {
+            synchronized(f) {
+                if (numero <= versaoGravada) return@synchronized   // já gravou uma mais nova: não volta atrás
+                try { Arquivo.gravarSeguro(f, texto); versaoGravada = numero }
+                catch (e: Exception) { Registro.anotar("ERRO viagens: não gravei (${e.javaClass.simpleName})") }
+            }
         }
+        if (agora) gravar.run() else gravador.execute(gravar)
     }
 
     private fun calcularResumo(v: JSONObject) {
@@ -152,7 +162,7 @@ object Viagens {
             Registro.anotar("viagem: terminou — ${"%.1f".format(v.optDouble("km"))} km em ${v.optLong("duracao_min")} min")
             try { Carro.fimDeViagem(v, motivo) } catch (_: Exception) { }
         }
-        salvar()
+        salvar(agora = true)
     }
 
     /** A central vai desligar (tela apagou / desligando): fecha a viagem. */

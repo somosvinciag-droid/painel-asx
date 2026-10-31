@@ -9,8 +9,9 @@ import java.io.FileOutputStream
  * (Com writeText direto, um corte de energia no meio deixava o arquivo vazio ou cortado.)
  */
 object Arquivo {
-    fun gravarSeguro(destino: File, texto: String) {
-        val tmp = File(destino.parentFile, destino.name + ".tmp")
+    /** [sufixo]: nome da cópia (duas linhas gravando o mesmo arquivo ao mesmo tempo usam sufixos diferentes). */
+    fun gravarSeguro(destino: File, texto: String, sufixo: String = ".tmp") {
+        val tmp = File(destino.parentFile, destino.name + sufixo)
         FileOutputStream(tmp).use { o ->
             o.write(texto.toByteArray(Charsets.UTF_8))
             o.flush()

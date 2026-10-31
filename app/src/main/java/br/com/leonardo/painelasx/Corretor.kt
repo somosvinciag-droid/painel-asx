@@ -24,7 +24,7 @@ object Corretor {
     /** Como o Whisper escreve "rota" no começo da frase (ele quase nunca ouve o "r"). */
     private val ROTA_FORTES = setOf(
         "rota", "rotas", "oto", "ota", "hota", "hoto", "quota", "cota", "pota", "poto", "vota", "voto",
-        "frota", "rotta", "ruta", "otra", "gota", "rolta", "rote", "hote", "rode"
+        "frota", "fota", "rotta", "ruta", "otra", "gota", "rolta", "rote", "hote", "rode"
     )
     /** Parecidas, mas que também são palavras de outros comandos: só viram "rota" se depois vier um lugar conhecido. */
     private val ROTA_DUVIDOSAS = setOf("outra", "outro", "volta", "roda", "rodo", "hora", "ora", "porta", "bota", "nota", "rato", "foto")
@@ -32,7 +32,7 @@ object Corretor {
 
     /** Comandos de uma palavra só e como o Whisper às vezes escreve. */
     private val UMA_PALAVRA = mapOf(
-        "proxima" to "próxima", "proximo" to "próxima", "proximas" to "próxima", "proxim" to "próxima", "maxima" to "próxima",
+        "proxima" to "próxima", "proximo" to "próxima", "proximas" to "próxima", "proxim" to "próxima",
         "anterior" to "anterior", "anteriores" to "anterior",
         "pausa" to "pausa", "pauso" to "pausa", "pausar" to "pausa", "pause" to "pausa", "posa" to "pausa", "pousa" to "pausa", "pauza" to "pausa",
         "continua" to "continua", "continue" to "continua", "continuo" to "continua", "continuar" to "continua",
@@ -71,6 +71,15 @@ object Corretor {
         // 1) comando de uma palavra
         UMA_PALAVRA[n]?.let { return prefixo + it }
 
+        // 1b) erros de junção comuns: "A nota que…" -> "anota que…"; "Né avise em…" -> "me avisa em…"
+        texto = Regex("^a nota(?= (que|a[ií]|isso|de|pra mim)\\b)", RegexOption.IGNORE_CASE).replace(texto, "anota")
+        Regex("^(n[eé]|me|mi|nem|e)\\s+(a\\s?vise|avisa|avise)\\b", RegexOption.IGNORE_CASE).find(texto)?.let { m ->
+            texto = "me avisa" + texto.substring(m.range.last + 1)
+        }
+
+        // 1c) frase curta parecida com um comando fixo ("Ele inicial" -> "tela inicial", "Posso mais grave" -> "voz mais grave")
+        fraseParecida(texto)?.let { return prefixo + it }
+
         // 2) "Oto para …" -> "rota para …"; "e leva para …" -> "me leva para …"
         val palavras = texto.split(Regex("\\s+")).toMutableList()
         val np = palavras.map { normalizar(it) }
@@ -79,8 +88,11 @@ object Corretor {
             palavras[0] = "rota"
             if (np[1] == "p") palavras[1] = "para"
             texto = palavras.joinToString(" ")
-        } else if (np.size >= 3 && np[0] in setOf("e", "a", "eu", "mi", "nem", "ne", "i") && np[1] in setOf("leva", "levar", "leve")) {
+        } else if (np.size >= 3 && np[0] in setOf("e", "a", "eu", "mi", "nem", "ne", "i", "de", "ni") && np[1] in setOf("leva", "levar", "leve")) {
             palavras[0] = "me"
+            texto = palavras.joinToString(" ")
+        } else if (np.size >= 2 && np[0] in setOf("nileva", "mileva", "meleva", "eleva", "deleva") && np[1] in PREPOSICOES) {
+            palavras[0] = "me leva"
             texto = palavras.joinToString(" ")
         }
         n = normalizar(texto)
@@ -104,6 +116,44 @@ object Corretor {
             texto = numerosParaDigitos(texto)
         }
         return prefixo + texto
+    }
+
+    // ------------------------------------------------------------------ frases fixas
+
+    /** Comandos sem nada variável (a frase inteira é o comando). Do AJUDA dos Comandos. */
+    val FIXAS = listOf(
+        "tela inicial", "tela do carro", "lê a tela", "limpar memória", "turbo", "rotina", "backup", "favoritos", "manutenção",
+        "voz mais grave", "voz mais fina", "fala mais devagar", "fala mais rápido", "voz normal",
+        "troquei o óleo", "calibrei os pneus", "qual o consumo", "quanto está o consumo",
+        "aumenta o volume", "abaixa o volume", "silêncio", "próxima", "anterior", "pausa", "continua", "voltar",
+        "para o rádio", "continua a música", "resumo do dia", "resumo da semana", "resumo do mês",
+        "abre a câmera", "câmera de ré", "onde está o carro", "como está o tempo", "vai chover",
+        "quantos km rodei hoje", "quantos km rodei essa semana", "quantos km rodei esse mês", "todos os apps",
+        "abre o spotify", "abre o waze", "abre o maps", "abre o whatsapp", "abre o youtube", "abre o rádio", "abre o telefone"
+    )
+    /** Começos de comandos com parte variável (nome de música, lugar, número…): nestes a frase inteira não é trocada. */
+    private val COMECOS_LIVRES = Regex("^(toca|tocar|toque|coloca|bota|poe|quero ouvir|rota|navega|me leva|vamos|anota|anotar|nota|pedido|" +
+        "abasteci|enchi|coloquei|salva|salvar|guarda|me avisa|me lembra|estacionei|parei|limite|volume|odometro|quilometragem|" +
+        "endereco|lembra|registra|clica|aperta|abre|abrir|abra)\\b")
+
+    /** A frase fixa mais parecida, se for bem parecida e sem empate. null = deixa como está. */
+    fun fraseParecida(texto: String): String? {
+        val n = normalizar(texto)
+        val palavras = n.split(" ").filter { it.isNotEmpty() }
+        if (palavras.isEmpty() || palavras.size > 5 || n.any { it.isDigit() }) return null
+        if (FIXAS.any { normalizar(it) == n }) return null          // já está certo
+        val k = som(n)
+        if (k.length < 4) return null
+        var melhor: String? = null; var r1 = 0.0; var r2 = 0.0
+        for (f in FIXAS) {
+            val kf = som(normalizar(f))
+            val r = 1.0 - distancia(k, kf).toDouble() / maxOf(k.length, kf.length)
+            if (r > r1) { r2 = r1; r1 = r; melhor = f } else if (r > r2) r2 = r
+        }
+        val f = melhor ?: return null
+        // As que começam com palavra de comando livre ("toca…", "abre…") precisam ser quase iguais.
+        val minimo = if (COMECOS_LIVRES.containsMatchIn(n)) 0.86 else 0.75
+        return if (r1 >= minimo && r1 - r2 >= 0.05) f else null
     }
 
     // ------------------------------------------------------------------ lugares
