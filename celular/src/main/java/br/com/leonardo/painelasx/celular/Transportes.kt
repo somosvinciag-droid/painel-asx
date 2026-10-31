@@ -160,9 +160,12 @@ class AcessorioActivity : Activity() {
         val acc: UsbAccessory? = if (Build.VERSION.SDK_INT >= 33)
             intent.getParcelableExtra(UsbManager.EXTRA_ACCESSORY, UsbAccessory::class.java)
         else @Suppress("DEPRECATION") intent.getParcelableExtra(UsbManager.EXTRA_ACCESSORY)
-        val km = getSystemService(android.app.KeyguardManager::class.java)
-        Ponte.iniciar(this, comMicrofone = km?.isKeyguardLocked != true, acessorio = acc)
-        finish()
+        // Aparece por cima da tela de bloqueio (o celular fica no suporte, muitas vezes bloqueado) e fica "na frente"
+        // por 1,5 s: é a chance que o Android 14+ dá para a Ponte ligar com o microfone, sem o Leonardo abrir o app.
+        // Se o Android recusar o microfone, a Ponte liga sem ele (plano B dentro de Ponte.primeiroPlano).
+        if (Build.VERSION.SDK_INT >= 27) setShowWhenLocked(true)
+        Ponte.iniciar(this, comMicrofone = true, acessorio = acc)
+        window.decorView.postDelayed({ if (!isFinishing) finish() }, 1500)
     }
 
     override fun onNewIntent(intent: Intent?) {

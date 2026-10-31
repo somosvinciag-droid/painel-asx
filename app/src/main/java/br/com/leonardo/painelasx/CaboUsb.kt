@@ -92,7 +92,8 @@ object CaboUsb {
     private var ultimoTratado = ""
     private var ultimoTratadoEm = 0L
 
-    fun usarCabo(ctx: Context) = CaboCelular.prefs(ctx).getBoolean("cabo_painel", false)
+    /** Padrão (decisão do Leonardo, 31/10): o cabo é do Painel ASX; o Android Auto com fio fica para o interruptor. */
+    fun usarCabo(ctx: Context) = CaboCelular.prefs(ctx).getBoolean("cabo_painel", true)
 
     /** O Leonardo mudou o interruptor. Depois de mudar, é preciso tirar e pôr o cabo. */
     fun mudarCabo(ctx: Context, painel: Boolean) {
@@ -115,6 +116,15 @@ object CaboUsb {
         app = a
         if (preparado) return
         preparado = true
+        // Primeira vez com esta versão: liga o filtro do cabo (padrão = Painel ASX), uma vez só.
+        if (!CaboCelular.prefs(a).contains("cabo_painel")) {
+            CaboCelular.prefs(a).edit().putBoolean("cabo_painel", true).apply()
+            try {
+                a.packageManager.setComponentEnabledSetting(ComponentName(a.packageName, ALIAS),
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
+                Registro.anotar("cabo USB: padrão ligado (o cabo é do Painel ASX)")
+            } catch (e: Exception) { Registro.anotar("cabo USB: não liguei o padrão (${e.javaClass.simpleName})") }
+        }
         val f = IntentFilter().apply {
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)

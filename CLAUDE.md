@@ -179,8 +179,12 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
   (serviço `connectedDevice|microphone`) abre um servidor TCP na porta 48110 SÓ na interface `bt-pan` e só aceita
   clientes da mesma sub-rede. A central (`CaboCelular`) acha o celular pelo gateway da rede Bluetooth e conecta.
   Não briga com o ZLink: o cabo continua com o Android Auto e carregando.
-- Fase 2 (cabo AOA) já no código, DESLIGADA: interruptor "Cabo USB do celular para o Painel ASX" na MainActivity
-  (padrão = Android Auto). Desligado, a central não mexe no cabo (o `activity-alias` `.CaboPeloPainel` com o filtro USB
+- Cabo AOA: o Leonardo decidiu (31/10) que o cabo é do Painel ASX (abre mão do Android Auto com fio). Padrão LIGADO desde
+  a primeira execução (`cabo_painel` true, alias ligado uma vez); o Bluetooth fica para internet, ligações e reserva dos dados.
+  Música: Spotify na própria central (Spotify Connect pelo celular). REGRA DO LEONARDO: tudo é configurado UMA vez
+  ("usar por padrão"/"Sempre") e depois é só plugar o cabo — nada de pedir permissão ou abrir app de novo.
+  No celular, a `AcessorioActivity` abre por cima do bloqueio por 1,5 s ao plugar e liga a Ponte com microfone.
+  Interruptor "Cabo USB do celular para o Painel ASX" na MainActivity (desligado = Android Auto). Desligado, a central não mexe no cabo (o `activity-alias` `.CaboPeloPainel` com o filtro USB
   fica desabilitado). Ligado: liga o alias, pede a permissão do Android (o Leonardo toca em Permitir) e manda os textos
   AOA `Leonardo`/`PainelASX` (os mesmos do `accessory_filter.xml` do celular). Mesmo protocolo nos dois caminhos
   (interface `Canal`: `CanalRede`, `CanalAoa`/`CanalAcessorio`).
