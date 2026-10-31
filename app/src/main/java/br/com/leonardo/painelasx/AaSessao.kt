@@ -287,11 +287,14 @@ class AaSessao(
                 val s = fila.poll(1, TimeUnit.SECONDS)
                 if (fim.get()) break
                 if (s != null && s.canal == CONTROLE_TLS) {
-                    if (!t.escrever(AaQuadro.cifrado(0, 0x0b, s.texto))) { encerrar("escrita: o cabo não aceitou"); return }
-                } else if (s != null && s.canal >= 0) {
+                    // Registros de controle do TLS (ex.: TLS 1.3 KeyUpdate) criados pela leitura: saem AQUI, nesta linha,
+                    // na mesma ordem em que o motor TLS os numerou (senão o celular vê a numeração trocada e cai).
                     val m = motor ?: break
                     for (c in m.controlePendente()) if (!t.escrever(AaQuadro.cifrado(0, 0x0b, c))) { encerrar("escrita: o cabo não aceitou"); return }
-                    val corpo = m.cifrar(s.texto)
+                } else if (s != null && s.canal >= 0) {
+                    val m = motor ?: break
+                    val (ctl, corpo) = m.cifrarComControle(s.texto)
+                    for (c in ctl) if (!t.escrever(AaQuadro.cifrado(0, 0x0b, c))) { encerrar("escrita: o cabo não aceitou"); return }
                     if (!t.escrever(AaQuadro.cifrado(s.canal, s.flags, corpo))) { encerrar("escrita: o cabo não aceitou"); return }
                 }
                 val a = agora()
@@ -331,19 +334,22 @@ class AaSessao(
             // Aberto depois do TLS. Pedaço atrasado do aperto de mão (ex.: TLS 1.3 manda o "ticket" depois):
             // passa pelo motor TLS para a numeração dos registros não se perder. O resto (versão atrasada) é ignorado.
             if (canal == 0 && n >= 2 && b[ini].toInt() == 0 && b[ini + 1].toInt() == Aa.TLS) {
-                m.decifrar(b, ini + 2, n - 2)
-                for (c in m.controlePendente()) fila.offer(Saida(CONTROLE_TLS, 0x0b, c))
+                m.decifrarAberto(b, ini + 2, n - 2)
+                if (m.temControle()) fila.offer(Saida(CONTROLE_TLS, 0x0b, ByteArray(0)))
             } else umaVez("aberto", "aa: quadro aberto depois do TLS ignorado (canal $canal)")
             return
         }
         val nTexto = m.decifrar(b, ini, n)
-        // Registros só de controle do TLS (raros): já cifrados, a linha de escrita manda no canal 0.
-        for (c in m.controlePendente()) fila.offer(Saida(CONTROLE_TLS, 0x0b, c))
+        // Registros só de controle do TLS (raros): ficam no motor; a linha de escrita é acordada e manda no canal 0.
+        if (m.temControle()) fila.offer(Saida(CONTROLE_TLS, 0x0b, ByteArray(0)))
         val msg = remontador.aceitar(canal, flags, total, m.buffer(), 0, nTexto) ?: return
         try {
             tratar(msg)
         } catch (e: ProtoErro) {
             umaVez("proto${msg.canal}:${msg.tipo}", "aa: mensagem mal formada no canal ${Aa.nomeCanal(msg.canal)} tipo ${msg.tipo} (${e.message})")
+        } catch (e: RuntimeException) {
+            // Erro do lado da central (som, tela...) ao tratar UMA mensagem: não derruba a conversa com o celular.
+            umaVez("exc${msg.canal}:${msg.tipo}", "ERRO aa: ao tratar canal ${Aa.nomeCanal(msg.canal)} tipo ${msg.tipo}: ${e.javaClass.simpleName}: ${e.message?.take(80)}")
         }
     }
 

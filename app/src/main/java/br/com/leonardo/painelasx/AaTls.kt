@@ -179,8 +179,24 @@ class AaMotorTls(ctx: SSLContext, cliente: Boolean = true, protocolos: Array<Str
      * retorno de [buffer]). Registros só de controle (ex.: TLS 1.3 KeyUpdate) podem gerar bytes para mandar:
      * ficam em [controlePendente].
      */
-    @Synchronized fun decifrar(b: ByteArray, ini: Int, n: Int): Int {
-        val fonte = ByteBuffer.wrap(b, ini, n)
+    @Synchronized fun decifrar(b: ByteArray, ini: Int, n: Int): Int = decifrarInterno(ByteBuffer.wrap(b, ini, n), false)
+
+    /**
+     * Bytes do aperto de mão que chegam ABERTOS depois do fim (TLS 1.3: "ticket"), às vezes partidos entre quadros:
+     * um registro partido fica guardado (junto com o que sobrou do aperto de mão, [pendente]) até o resto chegar.
+     */
+    @Synchronized fun decifrarAberto(b: ByteArray, ini: Int, n: Int): Int {
+        val junto = ByteArray(pendente.size + n)
+        System.arraycopy(pendente, 0, junto, 0, pendente.size)
+        System.arraycopy(b, ini, junto, pendente.size, n)
+        val fonte = ByteBuffer.wrap(junto)
+        val r = decifrarInterno(fonte, true)
+        if (fonte.remaining() > AaQuadro.MAX_CORPO) throw SSLException("TLS: aperto de mão atrasado grande demais")
+        pendente = if (fonte.hasRemaining()) ByteArray(fonte.remaining()).also { fonte.get(it) } else ByteArray(0)
+        return r
+    }
+
+    private fun decifrarInterno(fonte: ByteBuffer, guardarResto: Boolean): Int {
         app.clear()
         var voltas = 0
         var s = motor.handshakeStatus
@@ -198,6 +214,7 @@ class AaMotorTls(ctx: SSLContext, cliente: Boolean = true, protocolos: Array<Str
             }
             if (!fonte.hasRemaining()) break
             val r = motor.unwrap(fonte, app)
+            if (r.status == Status.BUFFER_UNDERFLOW && guardarResto) break
             if (r.status != Status.OK) throw SSLException("TLS: unwrap ${r.status}")
             s = tarefas()
             if (r.bytesConsumed() == 0 && r.bytesProduced() == 0) throw SSLException("TLS: unwrap parado")
@@ -209,6 +226,18 @@ class AaMotorTls(ctx: SSLContext, cliente: Boolean = true, protocolos: Array<Str
     fun buffer(): ByteArray = app.array()
 
     @Synchronized fun controlePendente(): List<ByteArray> = if (controle.isEmpty()) emptyList() else ArrayList(controle).also { controle.clear() }
+
+    @Synchronized fun temControle() = controle.isNotEmpty()
+
+    /**
+     * Cifra uma mensagem e devolve ANTES dela os registros de controle pendentes, tudo sob a mesma trava: assim a
+     * ordem de envio é a mesma da numeração do TLS (um KeyUpdate criado pela leitura nunca sai depois de uma
+     * mensagem cifrada depois dele).
+     */
+    @Synchronized fun cifrarComControle(b: ByteArray): Pair<List<ByteArray>, ByteArray> {
+        val ctl = controlePendente()
+        return ctl to cifrar(b)
+    }
 
     fun fechar() { try { motor.closeOutbound() } catch (_: Exception) { } }
 }
