@@ -133,7 +133,7 @@ class MainActivity : Activity() {
 
         val priv = cartao(col, "Privacidade")
         priv.addView(texto(
-            "Este app só conversa com a central do seu carro (pela ancoragem Bluetooth ou pelo cabo). " +
+            "Este app só conversa com a central do seu carro (pelo cabo ou pela ancoragem Bluetooth). " +
                 "Ele não manda nada para a internet. As mensagens só saem do celular se você ligar " +
                 "\"Ler mensagens\" no Painel ASX do carro, e lá elas só são faladas, nunca guardadas.", 14f, CINZA))
         pintar()
@@ -170,7 +170,8 @@ class MainActivity : Activity() {
         passo("1. Avisos do app", temPermissao(Manifest.permission.POST_NOTIFICATIONS), "Permitir avisos") {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
-        passo("2. Microfone (para o FALAR do carro)", temPermissao(Manifest.permission.RECORD_AUDIO), "Permitir o microfone") {
+        passo("2. Microfone (para o FALAR do carro)", temPermissao(Manifest.permission.RECORD_AUDIO), "Permitir o microfone",
+            "Escolha \"Durante o uso do app\" (não \"Só desta vez\").") {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 2)
         }
         passo("3. Acesso às notificações (música e mensagens)", acessoNotificacoes(), "Abrir acesso às notificações",
@@ -193,8 +194,15 @@ class MainActivity : Activity() {
             "Lá: Economia de bateria → Sem restrições; desligue \"Pausar atividade do app se não for usado\".") {
             abrirPaginaDoApp()
         }
-        passo("7. Ancoragem Bluetooth ligada (no carro)", Ponte.ancoragemLigada(), "Abrir ancoragem",
-            "É a mesma \"internet por Bluetooth\" que você já usa para a central.") {
+        passo("7. Mostrar na tela de bloqueio (Xiaomi)", null, "Abrir outras permissões",
+            "Em \"Outras permissões\", permita \"Mostrar na tela de bloqueio\" e \"Abrir novas janelas em segundo plano\". " +
+                "Assim, ao plugar o cabo com o celular bloqueado, ele liga sozinho o microfone para o carro.") {
+            startActivity(Intent("miui.intent.action.APP_PERM_EDITOR")
+                .setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity")
+                .putExtra("extra_pkgname", packageName))
+        }
+        passo("8. Ancoragem Bluetooth ligada (no carro)", Ponte.ancoragemLigada(), "Abrir ancoragem",
+            "É a mesma \"internet por Bluetooth\" que você já usa para a central (e a reserva se o cabo falhar).") {
             try { startActivity(Intent().setClassName("com.android.settings", "com.android.settings.TetherSettings")) }
             catch (_: Exception) { startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS)) }
         }
