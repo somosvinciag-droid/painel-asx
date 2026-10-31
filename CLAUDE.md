@@ -183,7 +183,23 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
   a primeira execução (`cabo_painel` true, alias ligado uma vez); o Bluetooth fica para internet, ligações e reserva dos dados.
   Música: Spotify na própria central (Spotify Connect pelo celular). REGRA DO LEONARDO: tudo é configurado UMA vez
   ("usar por padrão"/"Sempre") e depois é só plugar o cabo — nada de pedir permissão ou abrir app de novo.
-  No celular, a `AcessorioActivity` abre por cima do bloqueio por 1,5 s ao plugar e liga a Ponte com microfone.
+  No celular, a `AcessorioActivity` (showWhenLocked + turnScreenOn NO MANIFESTO, sem toques) abre por cima do bloqueio ao
+  plugar e liga a Ponte com microfone no `onResume` (só "na frente" o Android 14+ dá o microfone; reserva em 1,2 s).
+- Cabo, regras que já quebraram (revisão de 31/10):
+  - Logo depois do modo acessório o app do celular ainda não lê: `CanalAoa.escrever` insiste até 10 s (antes a 1ª
+    escrita de 1 s falhava e o cabo nunca era tentado de novo).
+  - A central repete o `ola` de 3 em 3 s até o celular responder (`Conexao.respondeu`); no cabo, 10 s sem NADA
+    (`Conexao.recebidas == 0`) = outro app (ZLink/Android Auto) com o cabo → `CaboUsb.alheios` até soltar; segue pela rede.
+  - Cabo que cai com o celular plugado (central dormiu/reabriu o app): a central reabre (`CaboUsb.caboTerminou`) e o
+    celular reabre o acessório sozinho (`Ponte.reabrirCabo`; o Android só abre a AcessorioActivity numa plugada nova).
+  - Permissão USB da central: o aviso USB_DEVICE_ATTACHED NÃO pede na hora (o "usar por padrão" dá a permissão e abre a
+    `CaboActivity` logo depois); não empilha diálogo sobre o "Abrir com" do Android (só pede 15 s depois, ou na hora se
+    o celular estiver em modo MTP); no máximo 4 pedidos seguidos (`cabo_pedidos`, zera quando a permissão vem sozinha
+    ou ao religar o interruptor). O "padrão" do Android 10 é por aparelho EXATO (vendor/product/série): se o celular
+    aparecer em outro modo USB, pode perguntar de novo uma vez.
+  - FALAR pelo celular pega o foco de áudio (pausa o Spotify da central) e dá o bipe quando o celular avisa `ouvindo`.
+  - Música: se a própria central está tocando (Spotify Connect), a tela e os botões usam a sessão da central
+    (`Musica.centralTocando`); a do celular só quando a central não toca (capa do celular se faltar a da central).
   Interruptor "Cabo USB do celular para o Painel ASX" na MainActivity (desligado = Android Auto). Desligado, a central não mexe no cabo (o `activity-alias` `.CaboPeloPainel` com o filtro USB
   fica desabilitado). Ligado: liga o alias, pede a permissão do Android (o Leonardo toca em Permitir) e manda os textos
   AOA `Leonardo`/`PainelASX` (os mesmos do `accessory_filter.xml` do celular). Mesmo protocolo nos dois caminhos
@@ -213,6 +229,7 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
 - Microfone no celular (Android 14+): o serviço só ganha o tipo `microphone` quando é ligado com o app na frente (abrir
   o app ou tocar no aviso da ponte). Ligado pelo boot/acesso às notificações, fica só `connectedDevice` e o `ouvir`
   responde erro na hora (a central usa o ouvido próprio) + aviso "Toque aqui...".
-- Passos do HyperOS (botões na tela do app do celular): avisos, microfone, acesso às notificações (se "configuração
-  restrita": página do app → ⋮ → Permitir configurações restritas), bateria sem restrição, início automático, página do
-  app ("Pausar atividade" desligado), ancoragem Bluetooth.
+- Passos do HyperOS (botões na tela do app do celular): avisos, microfone ("Durante o uso do app"), acesso às
+  notificações (se "configuração restrita": página do app → ⋮ → Permitir configurações restritas), bateria sem restrição,
+  início automático, página do app ("Pausar atividade" desligado), "Outras permissões" (Mostrar na tela de bloqueio,
+  janelas em segundo plano), ancoragem Bluetooth.
