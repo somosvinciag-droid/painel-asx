@@ -79,6 +79,12 @@ object Jarvis {
                 Registro.anotar("jarvis: já saudei nesta partida")
                 return
             }
+            // O app reiniciou com o carro andando (não é partida): não sauda nem tira o Waze da frente.
+            if (!forcar && noMeioDaViagem(app)) {
+                prefs(app).edit().putLong("saudou_em", System.currentTimeMillis()).putInt("saudou_boot", bootAtual(app)).commit()
+                Registro.anotar("jarvis: carro andando (meio da viagem), não saúdo nem abro a tela")
+                return
+            }
             ultimaPartida = agora
             saudando = true
             prefs(app).edit().putLong("saudou_em", System.currentTimeMillis()).putInt("saudou_boot", bootAtual(app)).commit()
@@ -134,6 +140,23 @@ object Jarvis {
         val agora = System.currentTimeMillis()
         val atualizou = try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).lastUpdateTime } catch (_: Exception) { 0L }
         return agora - saudou > 10 * 60_000L && agora - atualizou > 3 * 60_000L
+    }
+
+    /**
+     * Verdadeiro se o carro está no meio de uma viagem (o app reiniciou dirigindo): andando agora, ou andou há
+     * menos de 3 min e a central não reiniciou nem dormiu depois disso. Desligar e ligar rápido (num posto) continua
+     * saudando, porque a central dorme ou reinicia nesse meio-tempo.
+     */
+    fun noMeioDaViagem(ctx: Context): Boolean {
+        if (Carro.velocidadeKmh > 15) return true
+        val p = prefs(ctx.applicationContext)
+        val andando = p.getLong("andando_em", 0L)
+        val agora = System.currentTimeMillis()
+        if (andando <= 0L || agora - andando > 3 * 60_000L || andando > agora) return false
+        val boot = agora - SystemClock.elapsedRealtime()
+        if (boot > andando) return false
+        if (p.getLong("dormiu_em", 0L) > andando) return false
+        return true
     }
 
     fun dormiu(ctx: Context) {

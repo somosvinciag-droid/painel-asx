@@ -139,4 +139,11 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
   linha principal; o registro mede cada etapa ("inicio: … ms", "jarvis: carro ligou (X ms…)").
 - Ouvido pré-carrega só depois da saudação e >= 20 s do início. Partida sem "Iron Man" (`musica_entrada_v2`, padrão desligado).
 - `Partida.kt`: "--- abriu na partida ---" no diagnóstico (UsageStats; o Leonardo liga "Acesso ao uso" uma vez).
-- Pendente (decisão do Leonardo): saudar de novo depois de uma soneca curta (< 2 min) da central — hoje sauda.
+- Decidido pelo Leonardo: desligar e ligar rápido (soneca curta) continua saudando.
+
+## v23: revisão 3 e meio da viagem
+
+- `Corretor` não troca frase que perderia uma palavra real ("troquei o pneu" não vira óleo; "mais baixo" não vira rápido).
+- Ouvido tenta baixar de novo assim que a internet volta (conector/despertador), no máximo 1 vez a cada 15 s.
+- Meio da viagem (pedido do Leonardo): `Carro` grava `andando_em` (>15 km/h, a cada 20 s); `Jarvis.noMeioDaViagem` —
+  andando agora, ou andou há < 3 min sem boot/sono depois — impede saudar e abrir a tela do carro por cima do Waze.

@@ -53,6 +53,7 @@ object Carro {
 
     // ré
     private var volumeAntesRe = -1
+    private var gravouAndando = 0L
 
     fun iniciar(ctx: Context) { appCtx = ctx.applicationContext }
 
@@ -69,6 +70,11 @@ object Carro {
         val agora = System.currentTimeMillis()
         val kmh = if (l.hasSpeed()) l.speed * 3.6 else 0.0
         velocidadeKmh = kmh
+        // Marca que o carro está andando (o Jarvis não sauda se o app reiniciar no meio da viagem).
+        if (kmh > 15 && agora - gravouAndando > 20_000) {
+            gravouAndando = agora
+            ctx.getSharedPreferences("config", android.content.Context.MODE_PRIVATE).edit().putLong("andando_em", agora).apply()
+        }
         val dt = if (ultimoTempo > 0) (agora - ultimoTempo).coerceIn(0, 5000) else 0
         ultimoTempo = agora
 
