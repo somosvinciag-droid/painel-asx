@@ -396,7 +396,9 @@ object CaboUsb {
                 val dados = (textos[i] + "\u0000").toByteArray(Charsets.UTF_8)
                 if (c.controlTransfer(0x40, 52, 0, i, dados, dados.size, 1000) < 0) return false
             }
-            return c.controlTransfer(0x40, 53, 0, 0, null, 0, 1000) >= 0
+            // -1 aqui é normal: o celular já começou a voltar como acessório antes de confirmar (o HUR aceita).
+            c.controlTransfer(0x40, 53, 0, 0, null, 0, 1000)
+            return true
         } finally {
             c.close()
         }
@@ -416,7 +418,8 @@ object CaboUsb {
         }
         if (ent == null || sai == null) return null
         val c = um.openDevice(d) ?: return null
-        if (!c.claimInterface(intf, true)) { c.close(); return null }
+        // Primeiro sem forçar (não toma o cabo de outro app à força); só força se não houver dono.
+        if (!c.claimInterface(intf, false) && !c.claimInterface(intf, true)) { c.close(); return null }
         return CanalAoa(c, intf, ent, sai, d.deviceName)
     }
 
