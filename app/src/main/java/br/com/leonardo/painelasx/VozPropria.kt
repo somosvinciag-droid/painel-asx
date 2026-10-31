@@ -79,12 +79,12 @@ object VozPropria {
         if (!f.exists() || f.length() < 2000 || !ligada(ctx)) return false
         Thread({
             try {
-                java.io.DataInputStream(java.io.BufferedInputStream(f.inputStream())).use { i ->
-                    val taxa = i.readInt()
-                    val n = ((f.length() - 4) / 2).toInt()
-                    val pcm = ShortArray(n) { i.readShort() }
-                    tocarPcm(pcm, taxa)
-                }
+                // Lê o arquivo de uma vez (antes eram ~100 mil leituras de 2 bytes, com o app ainda "frio" na partida).
+                val b = java.nio.ByteBuffer.wrap(f.readBytes())   // big-endian, como o DataOutputStream gravou
+                val taxa = b.int
+                val pcm = ShortArray(b.remaining() / 2)
+                b.asShortBuffer().get(pcm)
+                tocarPcm(pcm, taxa)
             } catch (e: Throwable) {
                 Registro.anotar("ERRO saudação: ${e.message}")
             } finally {

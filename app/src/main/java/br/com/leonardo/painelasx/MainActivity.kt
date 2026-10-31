@@ -431,7 +431,7 @@ class MainActivity : Activity() {
 
         try {
             val u = Viagens.ultima()
-            val s = Viagens.resumo(7)
+            val s = Viagens.resumo(7, comLista = false)
             val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale("pt", "BR"))
             textoViagens.text = (if (u != null)
                 "Última: %.1f km · %d min · máx %d km/h (%s)\n".format(

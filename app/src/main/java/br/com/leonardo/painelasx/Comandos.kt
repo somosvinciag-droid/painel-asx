@@ -230,7 +230,7 @@ object Comandos {
     }
 
     private fun resumo(dias: Int): String {
-        val r = Viagens.resumo(dias)
+        val r = Viagens.resumo(dias, comLista = false)
         val periodo = when (dias) { 1 -> "Hoje"; 7 -> "Nos últimos 7 dias"; else -> "Nos últimos $dias dias" }
         return "$periodo: ${r.optInt("viagens")} viagens, ${r.optDouble("km_total")} quilômetros, ${r.optDouble("horas_dirigindo")} horas dirigindo" +
             (if (!r.isNull("nota_media")) ", nota média ${r.optInt("nota_media")}." else ".")
@@ -249,7 +249,7 @@ object Comandos {
                 t.contains("mes") -> 30
                 else -> 7
             }
-            val r = Viagens.resumo(dias)
+            val r = Viagens.resumo(dias, comLista = false)
             return "Nos últimos $dias dia(s): ${r.optInt("viagens")} viagens, ${r.optDouble("km_total")} km, ${r.optDouble("horas_dirigindo")} h dirigindo."
         }
 

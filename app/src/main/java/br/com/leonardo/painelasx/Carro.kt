@@ -148,7 +148,7 @@ object Carro {
     }
 
     private fun chegandoEmCasa(ctx: Context) {
-        val r = Viagens.resumo(1)
+        val r = Viagens.resumo(1, comLista = false)
         Rede.naTela {
             Rotina.teclaMidia(ctx, KeyEvent.KEYCODE_MEDIA_PAUSE)
             Painel.abrir(ctx)
@@ -187,7 +187,7 @@ object Carro {
         if (motivo == "parou") {
             val ctx = appCtx ?: return
             val km = v.optDouble("km")
-            val hoje = Viagens.resumo(1).optDouble("km_total")
+            val hoje = Viagens.resumo(1, comLista = false).optDouble("km_total")
             avisar("Viagem encerrada: ${"%.1f".format(km)} quilômetros, nota $nota. Hoje: ${"%.0f".format(hoje)} quilômetros.", Voz.Tipo.INFO)
             Diario.somarKm(ctx, km)
         } else {

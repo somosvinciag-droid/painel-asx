@@ -23,12 +23,7 @@ object Nwd {
     const val VOLTAR: Byte = 18
     const val INICIO: Byte = 20
 
-    fun prop(nome: String): String = try {
-        val p = ProcessBuilder("getprop", nome).redirectErrorStream(true).start()
-        val t = p.inputStream.bufferedReader().readText().trim()
-        p.waitFor()
-        t
-    } catch (_: Exception) { "" }
+    fun prop(nome: String): String = Props.ler(nome)
 
     /** Pede ao sistema da NWD para gravar a propriedade (confira depois com [prop]). */
     fun pedirProp(ctx: Context, nome: String, valor: String) {
@@ -91,4 +86,27 @@ object Nwd {
         o.put("regras", regras)
         return o
     }
+}
+
+/**
+ * Ler uma propriedade da central. Direto (SystemProperties, sem abrir outro programa) quando o Android deixa;
+ * senão, pelo "getprop" como antes. Abrir o getprop cria um processo novo (copiar um app grande como este
+ * custa caro no processador fraco da central); a tela do carro fazia isso a cada 30 s e o leitor do carro a cada 3 s.
+ */
+object Props {
+    private val metodo: java.lang.reflect.Method? = try {
+        Class.forName("android.os.SystemProperties").getMethod("get", String::class.java)
+    } catch (_: Throwable) { null }
+
+    /** null = o Android não deixou ler direto. */
+    fun direto(nome: String): String? = try { metodo?.invoke(null, nome) as? String } catch (_: Throwable) { null }
+
+    fun peloGetprop(nome: String): String = try {
+        val p = ProcessBuilder("getprop", nome).redirectErrorStream(true).start()
+        val t = p.inputStream.bufferedReader().readText().trim()
+        p.waitFor()
+        t
+    } catch (_: Exception) { "" }
+
+    fun ler(nome: String): String = direto(nome)?.trim() ?: peloGetprop(nome)
 }
