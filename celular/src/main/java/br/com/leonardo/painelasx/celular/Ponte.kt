@@ -54,6 +54,9 @@ class Ponte : Service() {
         @Volatile var querMensagens = false
             private set
         @Volatile private var ativa: Conexao? = null
+        /** A conversa aberta pelo cabo (mesmo antes do "olá" da central). */
+        @Volatile private var cabo: Conexao? = null
+        private val reabrindo = java.util.concurrent.atomic.AtomicBoolean(false)
         @Volatile private var pendente: Conexao? = null
         @Volatile private var pendenteMensagens = false
         @Volatile private var servidor: ServidorRede? = null
@@ -108,6 +111,7 @@ class Ponte : Service() {
                     try { tratar(cx, o) } catch (e: Exception) { cx.fechar("erro: ${e.javaClass.simpleName}") }
                 }
             }, { cx, m -> abertas.decrementAndGet(); h.post { caiu(cx, m) } })
+            if (canal.tipo == "cabo") cabo = c
             Thread({ c.rodar("ponte-${canal.tipo}") }, "ponte-${canal.tipo}").start()
             // A central tem de dizer "olá" (com o id dela) em 10 s.
             h.postDelayed({ if (c.viva && c !== ativa && c !== pendente) c.fechar("sem olá") }, 10_000)
@@ -182,7 +186,44 @@ class Ponte : Service() {
                 ultimoMotivo = motivo
             }
             if (pendente === c) pendente = null
+            if (cabo === c) {
+                cabo = null
+                // O cabo continua plugado (a central dormiu ou reiniciou o app dela): abre de novo sozinho.
+                // Antes, sem uma nova plugada o Android não abria a AcessorioActivity e o cabo ficava mudo.
+                if (motivo != "cabo solto" && motivo != "serviço desligado") ctx?.let { reabrirCabo(it) }
+            }
             atualizarAviso()
+        }
+
+        fun caboAberto() = cabo?.viva == true
+
+        /** Nosso acessório (os textos da central), se o cabo continua plugado e com permissão. */
+        fun nossoAcessorio(app: Context): UsbAccessory? = try {
+            val um = app.getSystemService(UsbManager::class.java)
+            um.accessoryList?.firstOrNull { it.manufacturer == "Leonardo" && it.model == "PainelASX" }
+                ?.takeIf { um.hasPermission(it) }
+        } catch (_: Exception) { null }
+
+        private fun reabrirCabo(app: Context) {
+            if (!reabrindo.compareAndSet(false, true)) return
+            Thread({
+                try {
+                    val um = app.getSystemService(UsbManager::class.java)
+                    val t0 = SystemClock.elapsedRealtime()
+                    while (rodando) {
+                        // 1 s nos primeiros 30 s, depois de 3 em 3 s (o arquivo do cabo pode estar ocupado um instante).
+                        Thread.sleep(if (SystemClock.elapsedRealtime() - t0 < 30_000) 1_000 else 3_000)
+                        if (caboAberto()) break
+                        val acc = nossoAcessorio(app) ?: break        // soltou o cabo: espera a próxima plugada
+                        val pfd = try { um.openAccessory(acc) } catch (_: Exception) { null } ?: continue
+                        novaConexao(CanalAcessorio(pfd))
+                        break
+                    }
+                } catch (_: Exception) {
+                } finally {
+                    reabrindo.set(false)
+                }
+            }, "ponte-cabo-reabrir").start()
         }
 
         /** O Leonardo tocou em Permitir/Recusar (ou "esquecer" na tela). */
@@ -365,6 +406,8 @@ class Ponte : Service() {
         registrar(caboSaiu, IntentFilter(UsbManager.ACTION_USB_ACCESSORY_DETACHED))
         MusicaCel.contexto(this)
         MusicaCel.iniciar(this)
+        // A Ponte (re)ligou com o cabo já no modo acessório (o HyperOS a fechou, o app foi atualizado...): abre já.
+        if (nossoAcessorio(this) != null) reabrirCabo(applicationContext)
     }
 
     private fun registrar(r: BroadcastReceiver, f: IntentFilter) {
@@ -420,6 +463,7 @@ class Ponte : Service() {
         Thread({
             try {
                 val um = getSystemService(UsbManager::class.java)
+                if (caboAberto()) return@Thread   // já reaberto pela Ponte
                 if (!um.hasPermission(acc)) { ultimoMotivo = "cabo: sem permissão para o acessório"; return@Thread }
                 val pfd = um.openAccessory(acc) ?: run { ultimoMotivo = "cabo: não abriu"; return@Thread }
                 novaConexao(CanalAcessorio(pfd))

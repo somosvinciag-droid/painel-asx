@@ -7,6 +7,7 @@ import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
+import android.view.WindowManager
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.Inet4Address
@@ -130,7 +131,7 @@ class ServidorRede(private val aoConectar: (Canal, String) -> Unit) {
     private fun dormir(ms: Long) = try { Thread.sleep(ms) } catch (_: InterruptedException) { }
 }
 
-/** Caminho 2 (fase 2, desligado na central por padrão): o celular como acessório USB (AOA). */
+/** Caminho 2: o celular como acessório USB (AOA), o caminho principal desde 31/10. */
 class CanalAcessorio(private val pfd: ParcelFileDescriptor) : Canal {
     override val tipo = "cabo"
     private val ent = FileInputStream(pfd.fileDescriptor)
@@ -151,20 +152,40 @@ class CanalAcessorio(private val pfd: ParcelFileDescriptor) : Canal {
 }
 
 /**
- * Tela invisível: o Android a abre quando a central pede o modo acessório pelo cabo (fase 2).
- * Como ela está na frente neste momento, a Ponte pode ligar com o microfone.
+ * Tela invisível: o Android a abre quando a central pede o modo acessório pelo cabo.
+ * Aparece por cima do bloqueio e acende a tela (manifesto). A Ponte é ligada no onResume, quando a tela está de fato
+ * "na frente": é a chance que o Android 14+ dá para a Ponte ligar com o microfone, sem o Leonardo abrir o app.
+ * Se ela não chegar à frente em 1,2 s (tela não acendeu), liga a Ponte assim mesmo (o cabo funciona; o microfone,
+ * se o Android recusar, fica para o ouvido da central — plano B dentro de Ponte.primeiroPlano).
+ * Não recebe toques (o Leonardo pode estar mexendo no celular) e fecha sozinha.
  */
 class AcessorioActivity : Activity() {
+    private var acc: UsbAccessory? = null
+    private var ligou = false
+    private val reserva = Runnable { ligarPonte() }
+
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
-        val acc: UsbAccessory? = if (Build.VERSION.SDK_INT >= 33)
+        acc = if (Build.VERSION.SDK_INT >= 33)
             intent.getParcelableExtra(UsbManager.EXTRA_ACCESSORY, UsbAccessory::class.java)
         else @Suppress("DEPRECATION") intent.getParcelableExtra(UsbManager.EXTRA_ACCESSORY)
-        // Aparece por cima da tela de bloqueio (o celular fica no suporte, muitas vezes bloqueado) e fica "na frente"
-        // por 1,5 s: é a chance que o Android 14+ dá para a Ponte ligar com o microfone, sem o Leonardo abrir o app.
-        // Se o Android recusar o microfone, a Ponte liga sem ele (plano B dentro de Ponte.primeiroPlano).
-        if (Build.VERSION.SDK_INT >= 27) setShowWhenLocked(true)
+        setShowWhenLocked(true)
+        setTurnScreenOn(true)
+        window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+        window.decorView.postDelayed(reserva, 1200)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        ligarPonte()
+    }
+
+    private fun ligarPonte() {
+        if (ligou) return
+        ligou = true
+        window.decorView.removeCallbacks(reserva)
         Ponte.iniciar(this, comMicrofone = true, acessorio = acc)
+        // Fica na frente mais 1,5 s: o serviço liga (com o microfone) enquanto o app ainda está "na frente".
         window.decorView.postDelayed({ if (!isFinishing) finish() }, 1500)
     }
 
