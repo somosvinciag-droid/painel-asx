@@ -188,6 +188,8 @@ object Comandos {
             Jarvis.mudarMusicaDeEntrada(ctx, liga)
             return if (liga) "Música de entrada ligada." else "Música de entrada desligada."
         }
+        if (Regex("(voz|fala|fale|falar) (mais )?(alta|alto)|aumenta (a voz|o volume da voz)").containsMatchIn(t) && !t.contains("menos")) return VozPropria.mudarVolume(ctx, 0.4f)
+        if (Regex("(voz|fala|fale|falar) (mais )?(baixa|baixo)|abaixa (a voz|o volume da voz)").containsMatchIn(t)) return VozPropria.mudarVolume(ctx, -0.4f)
         if (Regex("voz (mais )?(grave|grossa)").containsMatchIn(t) && !t.contains("menos")) return VozPropria.ajustar(ctx, -0.04f, 0f)
         if (Regex("voz (mais )?(fina|aguda)|voz menos grave").containsMatchIn(t)) return VozPropria.ajustar(ctx, 0.04f, 0f)
         if (Regex("(fala|falar|fale|voz) (mais )?(rapido|depressa|ligeiro)").containsMatchIn(t)) return VozPropria.ajustar(ctx, 0f, 0.07f)

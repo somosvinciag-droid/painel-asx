@@ -158,3 +158,8 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
   que dá igual ao getprop; getprop completo 1 vez por minuto. Lista de avisos de fábrica em `acoes_fabrica.txt`.
 - Música: `MediaController.Callback` (a capa só chega quando muda). Viagens: texto das viagens fechadas guardado
   durante a viagem. `Viagens.resumo(comLista = false)` para telas e frases.
+
+## v23: volume da voz
+- O Leonardo achou a voz baixa "mesmo aumentando o som". A voz própria agora toca pelo canal da MÚSICA (USAGE_MEDIA,
+  segue o botão de volume; antes era navegação) e é reforçada (`VozPropria.reforcar`: ganho `voz_volume`, padrão 1,6,
+  até 3, nunca passa de 95% do pico). Comandos: "voz mais alta" / "voz mais baixa" (±0,4).

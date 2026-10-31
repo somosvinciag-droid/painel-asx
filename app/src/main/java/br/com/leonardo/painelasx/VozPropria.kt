@@ -232,11 +232,34 @@ object VozPropria {
         tocarPcm(ShortArray(amostras.size) { i -> (amostras[i].coerceIn(-1f, 1f) * 32767).toInt().toShort() }, taxa)
     }
 
-    private fun tocarPcm(pcm: ShortArray, taxa: Int) {
-        if (pcm.isEmpty()) return
+    /** Volume da voz do Jarvis (1 = normal, até 3). "voz mais alta" / "voz mais baixa". */
+    fun volume(ctx: Context?) = p(ctx)?.getFloat("voz_volume", 1.6f) ?: 1.6f
+    fun mudarVolume(ctx: Context, delta: Float): String {
+        val v = (volume(ctx) + delta).coerceIn(0.6f, 3f)
+        p(ctx)!!.edit().putFloat("voz_volume", v).apply()
+        return if (delta > 0) "Assim está mais alto, senhor?" else "Assim está mais baixo, senhor?"
+    }
+
+    /**
+     * Deixa a voz mais alta: o Piper gera o áudio bem abaixo do máximo. Sobe até [volume] vezes, sem nunca passar
+     * do pico (não distorce). Vale também para a saudação já gravada.
+     */
+    private fun reforcar(pcm: ShortArray): ShortArray {
+        var pico = 1
+        for (x in pcm) { val a = if (x < 0) -x.toInt() else x.toInt(); if (a > pico) pico = a }
+        val limite = 0.95f * 32767f / pico
+        val g = minOf(volume(appCtx), limite)
+        if (g <= 1.01f) return pcm
+        return ShortArray(pcm.size) { i -> (pcm[i] * g).toInt().coerceIn(-32767, 32767).toShort() }
+    }
+
+    private fun tocarPcm(original: ShortArray, taxa: Int) {
+        if (original.isEmpty()) return
+        val pcm = reforcar(original)
+        // Pelo canal da MÚSICA: segue o botão de volume que o Leonardo gira (o canal de navegação da NWD fica baixo).
         val at = AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             .setAudioFormat(AudioFormat.Builder()
                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
