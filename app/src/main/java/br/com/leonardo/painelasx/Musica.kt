@@ -145,6 +145,37 @@ object Musica {
         return s.contains(ctx.packageName)
     }
 
+    /** O que está tocando, com capa e tempo (para a tela do carro F3). */
+    data class Tocando(val titulo: String, val artista: String, val capa: android.graphics.Bitmap?, val posicaoMs: Long, val duracaoMs: Long, val tocando: Boolean, val fonte: String)
+
+    fun tocando(ctx: Context): Tocando? {
+        radioTocando?.let { return Tocando(it, "Rádio online", null, 0, 0, true, "RÁDIO") }
+        if (!podeVerMusica(ctx)) return null
+        return try {
+            val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
+            val sessoes = msm.getActiveSessions(ComponentName(ctx, Ouvinte::class.java))
+            val s = sessoes.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: sessoes.firstOrNull() ?: return null
+            val m = s.metadata ?: return null
+            val titulo = m.getString(MediaMetadata.METADATA_KEY_TITLE) ?: return null
+            val artista = m.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""
+            val capa = m.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: m.getBitmap(MediaMetadata.METADATA_KEY_ART)
+            val st = s.playbackState
+            var pos = st?.position ?: 0L
+            if (st != null && st.state == PlaybackState.STATE_PLAYING && st.lastPositionUpdateTime > 0) {
+                pos += ((android.os.SystemClock.elapsedRealtime() - st.lastPositionUpdateTime) * st.playbackSpeed).toLong()
+            }
+            val fonte = when {
+                s.packageName.contains("spotify") -> "SPOTIFY"
+                s.packageName.contains("youtube") -> "YOUTUBE MUSIC"
+                s.packageName.contains("deezer") -> "DEEZER"
+                else -> "MÚSICA"
+            }
+            Tocando(titulo, artista, capa, pos, m.getLong(MediaMetadata.METADATA_KEY_DURATION), st?.state == PlaybackState.STATE_PLAYING, fonte)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     /** "Música — Artista" do app que está tocando agora, ou null. */
     fun tocandoAgora(ctx: Context): String? {
         radioTocando?.let { return "📻 $it" }
