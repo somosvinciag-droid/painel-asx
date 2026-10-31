@@ -8,7 +8,7 @@ import java.util.Calendar
 /**
  * O Jarvis do carro:
  *  - quando o carro liga: Turbo, tela do carro, "Bem-vindo, Leonardo", previsão e leads (de manhã),
- *    lembretes de manutenção e, por fim, "Iron Man" no Spotify;
+ *    lembretes de manutenção e, se ligado nos ajustes (padrão: desligado), "Iron Man" no Spotify;
  *  - conversa: o que não for comando vai para o Claude pelo servidor (se a chave da API estiver lá).
  */
 object Jarvis {
@@ -19,8 +19,13 @@ object Jarvis {
         private set
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("config", Context.MODE_PRIVATE)
-    fun musicaDeEntrada(ctx: Context) = prefs(ctx).getBoolean("musica_entrada", true)
-    fun mudarMusicaDeEntrada(ctx: Context, v: Boolean) = prefs(ctx).edit().putBoolean("musica_entrada", v).apply()
+    /**
+     * "Iron Man" no Spotify da central quando o carro liga. Desligado por padrão (o Leonardo toca a música pelo
+     * celular, por Bluetooth, e abrir o Spotify da central pesa na partida). Chave nova "musica_entrada_v2":
+     * quem tinha a antiga ("musica_entrada" = true) também fica desligado; religa na chave dos ajustes.
+     */
+    fun musicaDeEntrada(ctx: Context) = prefs(ctx).getBoolean("musica_entrada_v2", false)
+    fun mudarMusicaDeEntrada(ctx: Context, v: Boolean) = prefs(ctx).edit().putBoolean("musica_entrada_v2", v).apply()
 
     /** Número do boot do Android (muda a cada vez que a central reinicia). -1 = não sei. */
     private fun bootAtual(ctx: Context): Int = try {
