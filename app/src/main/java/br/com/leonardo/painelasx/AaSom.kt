@@ -36,8 +36,16 @@ class AaSom(ctx: Context, private val pausarCelular: () -> Unit) {
     private val am = ctx.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val tocadores = HashMap<Int, Tocador>()
 
+    private val falhou = HashSet<Int>()
+
     @Synchronized fun inicio(canal: Int, hz: Int, canais: Int) {
-        val t = tocadores.getOrPut(canal) { Tocador(canal, hz, canais) }
+        val t = tocadores[canal] ?: try {
+            Tocador(canal, hz, canais).also { tocadores[canal] = it }
+        } catch (e: Throwable) {
+            // A central sem tocador livre (ou formato recusado): sem som neste canal, mas a conversa continua.
+            if (falhou.add(canal)) Registro.anotar("ERRO aa: som ${Aa.nomeCanal(canal)} não abriu (${e.javaClass.simpleName})")
+            return
+        }
         t.comecar()
     }
 
@@ -47,7 +55,8 @@ class AaSom(ctx: Context, private val pausarCelular: () -> Unit) {
         t.colocar(b, ini, n)
     }
 
-    @Synchronized fun fim(canal: Int) { tocadores[canal]?.parar() }
+    /** O celular parou este som: toca até o fim o que já chegou (a voz do GPS não sai cortada) e solta o foco. */
+    @Synchronized fun fim(canal: Int) { tocadores[canal]?.terminar() }
 
     @Synchronized fun fecharTudo() {
         tocadores.values.forEach { it.soltar() }
@@ -67,7 +76,15 @@ class AaSom(ctx: Context, private val pausarCelular: () -> Unit) {
         @Volatile var ativo = false
         @Volatile var mudo = false
         @Volatile private var vivo = true
-        private var foco: AudioFocusRequest? = null
+        /** O celular mandou "parar": a linha do som toca o que falta e então para. */
+        @Volatile private var terminando = false
+        /** Outro app pegou o som de vez: o foco só volta quando o celular recomeçar a mandar som (depois de uma pausa). */
+        @Volatile private var perdeu = false
+        @Volatile private var ultimoDado = 0L
+        /** Quando o Android negou o foco (0 = não negou). */
+        @Volatile private var negadoEm = 0L
+        private val trava = Any()
+        @Volatile private var foco: AudioFocusRequest? = null
         private val linha: Thread
 
         init {
@@ -84,16 +101,22 @@ class AaSom(ctx: Context, private val pausarCelular: () -> Unit) {
                 .setBufferSizeInBytes(folga)
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
+            if (faixa.state != AudioTrack.STATE_INITIALIZED) {
+                try { faixa.release() } catch (_: Exception) { }
+                throw IllegalStateException("AudioTrack não iniciou")
+            }
             repeat(16) { livres.offer(ByteArray(pedaco)) }
             linha = Thread({ tocar() }, "aa-som-${Aa.nomeCanal(canal)}").apply { isDaemon = true; start() }
         }
 
         private val ouvinteFoco = AudioManager.OnAudioFocusChangeListener { f ->
             when (f) {
-                AudioManager.AUDIOFOCUS_GAIN -> { mudo = false; volume() }
+                AudioManager.AUDIOFOCUS_GAIN -> { perdeu = false; mudo = false; volume() }
                 AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> { mudo = true; volume() }
                 AudioManager.AUDIOFOCUS_LOSS -> {
                     mudo = true; volume()
+                    perdeu = true
+                    foco = null   // o Android já tirou o nosso pedido da fila
                     if (canal == Aa.CANAL_MIDIA) {
                         Registro.anotar("aa: outro app pegou o som da central; pausei a música do celular")
                         try { pausarCelular() } catch (_: Exception) { }
@@ -105,14 +128,30 @@ class AaSom(ctx: Context, private val pausarCelular: () -> Unit) {
 
         private fun volume() { try { faixa.setVolume(if (mudo) 0f else 1f) } catch (_: Exception) { } }
 
-        fun comecar() {
+        fun comecar() { synchronized(trava) {
+            terminando = false
             if (ativo) return
             ativo = true
             mudo = false
-            if (canal != Aa.CANAL_SISTEMA) pedirFoco()
+            perdeu = false
+            negadoEm = 0L
+            if (canal != Aa.CANAL_SISTEMA && foco == null) pedirFoco()
             volume()
             try { faixa.play() } catch (e: Exception) { Registro.anotar("ERRO aa: som ${Aa.nomeCanal(canal)} não tocou (${e.javaClass.simpleName})") }
-        }
+        } }
+
+        /** Fim pedido pelo celular: deixa a linha do som tocar o que já chegou e então parar (sem cortar a voz do GPS). */
+        fun terminar() { synchronized(trava) { if (ativo) terminando = true } }
+
+        /** Chamado pela linha do som quando a fila esvaziou depois do "parar" do celular. */
+        private fun acabouDeTocar() { synchronized(trava) {
+            if (!terminando || !cheios.isEmpty()) return
+            terminando = false
+            ativo = false
+            // stop() no modo contínuo toca o que ainda está no AudioTrack e então para (pause+flush cortaria o fim).
+            try { faixa.stop() } catch (_: Exception) { }
+            soltarFoco()
+        } }
 
         private fun pedirFoco() {
             try {
@@ -123,9 +162,18 @@ class AaSom(ctx: Context, private val pausarCelular: () -> Unit) {
                     .setOnAudioFocusChangeListener(ouvinteFoco, Rede.principal)
                     .build()
                 val r = am.requestAudioFocus(f)
-                foco = f
-                // Sem foco agora (o ouvido do Jarvis está ouvindo, ou uma ligação): começa mudo.
-                if (r != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) mudo = true
+                if (r == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                    foco = f
+                    negadoEm = 0L
+                    mudo = false
+                } else {
+                    // Sem foco agora (o ouvido do Jarvis está ouvindo, ou uma ligação): fica mudo e tenta de novo
+                    // de 2 em 2 s enquanto o som chega (sem isso a música ficaria muda até o celular recomeçar).
+                    try { am.abandonAudioFocusRequest(f) } catch (_: Exception) { }
+                    foco = null
+                    mudo = true
+                    negadoEm = android.os.SystemClock.elapsedRealtime()
+                }
             } catch (_: Exception) { }
         }
 
@@ -138,6 +186,18 @@ class AaSom(ctx: Context, private val pausarCelular: () -> Unit) {
         fun colocar(b: ByteArray, ini: Int, n: Int) {
             if (!vivo || n <= 0) return
             if (!ativo) comecar()   // dados sem "início" (reconexão): começa assim mesmo
+            val agora = android.os.SystemClock.elapsedRealtime()
+            // Música pausada porque outro app tocou na central e agora o celular voltou a mandar som (o Leonardo deu
+            // play): pede o foco de novo. Pacotes em seguida (sem pausa) ainda são da música que mandamos pausar.
+            if (perdeu && canal == Aa.CANAL_MIDIA && agora - ultimoDado > 1_500) {
+                perdeu = false
+                pedirFoco()
+                volume()
+            } else if (negadoEm > 0 && !perdeu && canal != Aa.CANAL_SISTEMA && agora - negadoEm > 2_000) {
+                pedirFoco()
+                volume()
+            }
+            ultimoDado = agora
             var p = 0
             while (p < n) {
                 val k = minOf(pedaco, n - p)
@@ -152,7 +212,9 @@ class AaSom(ctx: Context, private val pausarCelular: () -> Unit) {
         private fun tocar() {
             while (vivo) {
                 try {
-                    val (b, n) = cheios.poll(500, TimeUnit.MILLISECONDS) ?: continue
+                    val item = cheios.poll(200, TimeUnit.MILLISECONDS)
+                    if (item == null) { if (terminando) acabouDeTocar(); continue }
+                    val (b, n) = item
                     if (ativo) faixa.write(b, 0, n)
                     livres.offer(b)
                 } catch (_: InterruptedException) {
@@ -164,18 +226,22 @@ class AaSom(ctx: Context, private val pausarCelular: () -> Unit) {
             }
         }
 
-        fun parar() {
-            if (!ativo) return
+        /** Para na hora (fim da conversa): joga fora o que falta. */
+        fun parar() { synchronized(trava) {
+            terminando = false
+            if (!ativo) { soltarFoco(); return }
             ativo = false
-            cheios.clear()
+            while (true) { val x = cheios.poll() ?: break; livres.offer(x.first) }
             try { faixa.pause(); faixa.flush() } catch (_: Exception) { }
             soltarFoco()
-        }
+        } }
 
         fun soltar() {
             parar()
             vivo = false
             linha.interrupt()
+            // Espera a linha do som sair do write() antes de soltar o AudioTrack.
+            try { linha.join(500) } catch (_: InterruptedException) { }
             try { faixa.release() } catch (_: Exception) { }
         }
     }
