@@ -108,7 +108,11 @@ object Celular {
                 if (id.isNotEmpty() && id != capaId) {
                     val b = try {
                         val bytes = Base64.decode(o.optString("jpg"), Base64.DEFAULT)
-                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        // Confere o tamanho antes (256 KB de JPEG podem dizer 20000x20000 px = falta de memória).
+                        val dim = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, dim)
+                        if (dim.outWidth in 1..1024 && dim.outHeight in 1..1024) BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        else null
                     } catch (_: Exception) { null }
                     if (b != null) { capa = b; capaId = id }
                 }
@@ -132,6 +136,8 @@ object Celular {
         musica = null
         ligacao = "fim"
         bateria = -1
+        // Mensagens guardadas durante uma ligação não ficam para a "próxima" ligação (horas depois).
+        synchronized(guardadas) { guardadas.clear() }
         pedido?.let { p -> Rede.naTela { terminar(p, null, "celular caiu") } }
         if (estava) Registro.anotar("celular: desligou ($motivo)")
     }
