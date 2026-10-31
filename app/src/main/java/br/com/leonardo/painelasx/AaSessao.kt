@@ -212,6 +212,8 @@ class AaSessao(
     private fun versao(): Boolean {
         mudarEtapa("versão: pedindo")
         if (t.usb) {
+            // O Android Auto novo (16.4+) precisa de um respiro logo depois de abrir o cabo (como no Headunit Revived).
+            Thread.sleep(500)
             // Bytes velhos de uma conexão anterior: joga fora até o cabo ficar quieto (no máximo 0,5 s).
             val ate = agora() + 500
             var jogados = 0

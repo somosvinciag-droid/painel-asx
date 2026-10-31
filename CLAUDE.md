@@ -195,13 +195,15 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
   - Permissão USB da central: o aviso USB_DEVICE_ATTACHED NÃO pede na hora (o "usar por padrão" dá a permissão e abre a
     `CaboActivity` logo depois); não empilha diálogo sobre o "Abrir com" do Android (só pede 15 s depois, ou na hora se
     o celular estiver em modo MTP); no máximo 4 pedidos seguidos (`cabo_pedidos`, zera quando a permissão vem sozinha
-    ou ao religar o interruptor). O "padrão" do Android 10 é por aparelho EXATO (vendor/product/série): se o celular
+    ou ao escolher o modo do cabo de novo). O "padrão" do Android 10 é por aparelho EXATO (vendor/product/série): se o celular
     aparecer em outro modo USB, pode perguntar de novo uma vez.
   - FALAR pelo celular pega o foco de áudio (pausa o Spotify da central) e dá o bipe quando o celular avisa `ouvindo`.
   - Música: se a própria central está tocando (Spotify Connect), a tela e os botões usam a sessão da central
     (`Musica.centralTocando`); a do celular só quando a central não toca (capa do celular se faltar a da central).
-  Interruptor "Cabo USB do celular para o Painel ASX" na MainActivity (desligado = Android Auto). Desligado, a central não mexe no cabo (o `activity-alias` `.CaboPeloPainel` com o filtro USB
-  fica desabilitado). Ligado: liga o alias, pede a permissão do Android (o Leonardo toca em Permitir) e manda os textos
+  Modo do cabo (desde o receptor, ver "## Receptor de Android Auto"): escolha com 3 opções na MainActivity
+  (`CaboUsb.modo`, prefs `cabo_modo`): "Android Auto pelo Painel" (padrão), "app Painel ASX Celular" (teste) e "ZLink".
+  No ZLink a central não mexe no cabo (o `activity-alias` `.CaboPeloPainel` com o filtro USB
+  fica desabilitado). Modo "app": liga o alias, pede a permissão do Android (o Leonardo toca em Permitir) e manda os textos
   AOA `Leonardo`/`PainelASX` (os mesmos do `accessory_filter.xml` do celular). Mesmo protocolo nos dois caminhos
   (interface `Canal`: `CanalRede`, `CanalAoa`/`CanalAcessorio`).
 - Diagnóstico "--- cabo USB ---" (só leitura): `config_disableUsbPermissionDialogs`, uid/flags/assinatura do ZLink,
@@ -233,3 +235,85 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
   notificações (se "configuração restrita": página do app → ⋮ → Permitir configurações restritas), bateria sem restrição,
   início automático, página do app ("Pausar atividade" desligado), "Outras permissões" (Mostrar na tela de bloqueio,
   janelas em segundo plano), ancoragem Bluetooth.
+
+## Receptor de Android Auto (rascunho `rascunho-receptor`)
+
+O "ZLink nosso": o próprio Painel é o receptor de Android Auto (AA) pelo cabo. Modo do cabo PADRÃO "Android Auto pelo
+Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica como opção secundária; "ZLink" (`MODO_ZLINK`)
+= o Painel não mexe no cabo. Só cabo (sem Bluetooth, sem Wi-Fi). Configura uma vez ("usar por padrão" do USB) e pronto.
+
+### Desenho
+- `CaboUsb` manda o celular para o modo acessório com a identidade do AA (`TEXTOS_AA`: "Android"/"Android Auto"/"2.0.1"/
+  "HU-AAAAAA001", as do Headunit Revived). O app Android Auto do celular abre sozinho. O 18d1:2d00 que volta vai para
+  `AndroidAuto.entregarCabo` (no modo app vai para o `CaboCelular`).
+- `AaSessao` (sem Android, testada na JVM): versão 1.2 (o celular escolhe; ex. 1.7) com 3 tentativas e descarte dos bytes
+  velhos do cabo (0,5 s) → TLS (central = cliente, `SSLEngine`) → "autenticou" (aberto) → tudo cifrado: pedido/anúncio
+  de serviços, abertura de canais, foco de áudio (sempre concede), sensores, mídia (confirma cada pacote), ping nos dois
+  sentidos (a central manda de 5 em 5 s; 30 s sem nada = caiu), tchau. Linha de leitura (`aa-ler`) e de escrita
+  (`aa-escrever`) próprias; nada de exceção sai dela (`rodar()` devolve o motivo).
+- `AaQuadro`: cabeçalho [canal][flags][tamanho 2 bytes] (+ total 4 bytes só no 1º pedaço). Flags: 1 primeiro, 2 último,
+  4 controle, 8 cifrado (0x0b inteira; 0x09/0x08/0x0a pedaços). `Separador` (buffer reaproveitado) e `Remontador`
+  (vídeo NÃO é guardado: só avisado para confirmar; mensagens > 4 MB descartadas mas confirmadas).
+- `AaProto`/`AaMensagens`: protobuf ESCRITO À MÃO (sem dependência), só as mensagens usadas. Campos tirados dos .proto do
+  Headunit Revived.
+- `AaTls`: certificado de referência em `assets/aa/` (abaixo). TLS 1.2 é o normal; TLS 1.3 também funciona (o "ticket"
+  que chega depois em quadro aberto passa pelo motor TLS).
+- `AaSom`: um `AudioTrack` por canal (música 48 kHz estéreo; voz do GPS e sistema 16 kHz mono), todos no canal da MÚSICA
+  (volume da central), pedaços reaproveitados, linha própria por canal. Foco: música pede GANHO (o Jarvis falando →
+  o Android abaixa; ouvido do FALAR → mudo; outro app tocando na central → mudo + "pausa" ao celular); voz do GPS pede
+  "pode abaixar" enquanto fala.
+- `AndroidAuto` (cola com a central): estado, música (título/artista/capa ≤320 px/tempo/app), próxima curva, teclas,
+  `MediaSession` própria (volante e "próxima" do Jarvis chegam ao celular), modo noite (faróis ou pôr do sol, 1/min),
+  `estadoConector()` → campo `android_auto: {ligado, etapa, app_tocando, navegando}` no estado do conector,
+  diagnóstico "--- android auto ---". Reconexão: quando a conversa cai com o cabo plugado, `CaboUsb.caboTerminou` reabre
+  (nunca respondeu = outro app com o cabo → largado até soltar).
+
+### Canais anunciados (ids escolhidos por nós, os mesmos do Headunit Revived)
+| id | serviço | o que fazemos |
+|---|---|---|
+| 1 | sensores: dirigindo (13) + noite (10) | "sem restrição" ao abrir; noite pelo `LeitorCarro.faroisAcesos()`/`Clima.ehNoite()` |
+| 2 | vídeo 800x480 H.264 30 fps (obrigatório) | foco de vídeo **NATIVO** logo após combinar; pedidos de tela respondidos NATIVO; quadros que vierem são confirmados e jogados fora (nada de decodificar) |
+| 3 | entrada: só teclas 85/87/88/126/127 + tela 800x480 | botões da TelaCarro, volante (MediaSession) e Jarvis (`Rotina.teclaMidia`) |
+| 4 | voz (fala do GPS/assistente) 16 kHz mono | alto-falante do carro |
+| 5 | sistema 16 kHz mono | alto-falante do carro |
+| 6 | mídia 48 kHz estéreo | alto-falante do carro |
+| 9 | informação da música (0x8003 dados, 0x8001 estado) | `Musica.tocando` (fonte "SPOTIFY · ANDROID AUTO") |
+| 10 | navegação só com códigos (0x8004/0x8005 antigas, 0x8006/0x8007 novas) | frase discreta no rótulo `detalhe` da TelaCarro (no lugar dos km do dia), sem redesenho |
+- NÃO anunciados: microfone (7) e Bluetooth (8). Tipo de veículo = **moto (3)** no `headunit_info` (id "painel-asx-2012-moto"):
+  é o único tipo em que o celular grava com o próprio microfone ("Ok Google" do celular, opcional); com outro tipo e sem
+  microfone o celular aborta ("No audio/mic"). Precisa de Android 11+ no celular (o Redmi 15 tem).
+- Ligações: o AA NÃO leva o som da ligação pelo cabo (só Bluetooth HFP). Fica no celular. Canal de telefone não anunciado.
+
+### FALAR (decisão do Leonardo, 31/10)
+- O FALAR é SEMPRE do Jarvis (Comandos/Jarvis), nunca do Assistente do Google. Nada de tecla de voz para o AA.
+- `FonteDeVoz` (interface) + `FontesDeVoz.escolher()`: hoje o app do celular (quando ligado); com o AA ligado pelo cabo,
+  por enquanto o Ouvido próprio da central. Ponto de encaixe para depois: um canal paralelo no MESMO cabo (provavelmente
+  ADB, a decidir com o Leonardo) com o microfone do celular para o Jarvis — basta implementar `FonteDeVoz`.
+
+### Licença
+- Os arquivos `Aa*.kt` e `AndroidAuto.kt` adaptam o Headunit Revived / Open Headunit (AGPLv3; Copyright 2011-2015
+  Michael A. Reid e os contribuidores). Têm o aviso AGPLv3 no topo; o texto está em `LICENSE-AGPL-3.0.txt` e os avisos em
+  `NOTICE.md`. Como estão no mesmo APK, o app é distribuído nos termos da AGPLv3. O repo é público: isso cumpre a AGPL.
+  Ao mexer nesses arquivos, manter os avisos.
+
+### Certificado
+- `app/src/main/assets/aa/cert.pem` + `chave.pem`: certificado de REFERÊNCIA "Google-Android-Reference" (emissor
+  "Google Automotive Link", válido 2014–2044), copiado do Headunit Revived (`res/raw/cert`/`privkey`); o mesmo par está
+  no aasdk/OpenAuto. É a ÚNICA exceção documentada à regra "nada de chave no repo": é público e não é do Leonardo.
+- Risco: o Google pode deixar de aceitar esse certificado (ou mudar o AA, como fez com o sem fio no AA 17.4+). Aí todos os
+  receptores abertos param juntos. O certificado do lado do celular vence em 31/12/2026 (não conferimos, como o HUR).
+
+### Testes JVM (fora do repo)
+- `scratchpad/receptor/rodar.sh`: compila `AaProto/AaMensagens/AaQuadro/AaTls/AaSessao` com o kotlinc e roda 145 testes:
+  protobuf igual ao protobuf OFICIAL (bytes gerados em Python com os .proto do HUR, nos dois sentidos), quadros/pedaços,
+  e uma conversa completa com um "celular falso" (TLS 1.2 e 1.3 de verdade, cabo entregando em pedaços aleatórios).
+
+### O que só o teste no carro responde
+- Se o ZLink pega o cabo antes (caso A/B; ver o diagnóstico "--- cabo USB ---") e se o "usar por padrão" segura.
+- Se o AA do Redmi aceita o certificado de referência e o tipo "moto" sem perguntar nada (1ª vez: aceitar o carro novo
+  no celular desbloqueado).
+- Se o celular PARA de mandar vídeo com o foco nativo (o registro conta "vídeo recebido e descartado") e se o AA aceita
+  ficar sempre em nativo sem desistir.
+- Volume/latência do som pelo `AudioTrack` nesta central; convivência do foco de áudio com o Jarvis e o ouvido.
+- Se o volante (MediaSession) chega ao celular e se o Google Maps manda a navegação nova (0x8006/0x8007) ou a antiga.
+- Se o "Ok Google" do celular funciona com a central dizendo "moto".

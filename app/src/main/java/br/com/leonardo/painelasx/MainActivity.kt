@@ -336,14 +336,14 @@ class MainActivity : Activity() {
             CaboUsb.MODO_ZLINK to "ZLink de fábrica (o Painel não mexe no cabo)"
         )
         val grupo = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
-        val atual = CaboUsb.modo(this)
+        val modoAtual = CaboUsb.modo(this)
         modos.forEachIndexed { i, (m, t) ->
             grupo.addView(RadioButton(this).apply {
                 id = 7100 + i
                 text = t
                 setTextColor(TEXTO); textSize = 15f
                 setPadding(dp(4), dp(8), 0, dp(8))
-                isChecked = m == atual
+                isChecked = m == modoAtual
             })
         }
         grupo.setOnCheckedChangeListener { _, id ->

@@ -66,9 +66,14 @@ class CanalAoa(
     /** Android Auto: lê o que chegar (até [n] bytes) esperando no máximo [esperaMs]. -1 = fechado; 0 = nada. */
     fun lerBruto(buf: ByteArray, n: Int, esperaMs: Int): Int {
         if (fechado) return -1
+        val t0 = SystemClock.elapsedRealtime()
         val r = try { con.bulkTransfer(entrada, buf, minOf(n, 16384), esperaMs.coerceAtLeast(1)) } catch (_: Exception) { -1 }
         if (fechado) return -1
-        return if (r > 0) r else 0
+        if (r > 0) return r
+        // -1 na hora (sem esperar o tempo) = erro do USB, não "nada chegou": um respiro para não rodar em falso
+        // até o aviso de "cabo solto" chegar.
+        if (r < 0 && SystemClock.elapsedRealtime() - t0 < esperaMs / 2) try { Thread.sleep(50) } catch (_: InterruptedException) { }
+        return 0
     }
 
     /**
