@@ -3,6 +3,10 @@ package br.com.leonardo.painelasx
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.SystemClock
 import android.util.Base64
 import org.json.JSONObject
@@ -67,7 +71,10 @@ object Celular {
 
     // ------------------------------------------------------------------ mensagens que chegam
 
+    @Volatile private var app: Context? = null
+
     fun receber(ctx: Context, cx: Conexao, o: JSONObject) {
+        app = ctx.applicationContext
         when (o.optString("t")) {
             "ola" -> {
                 cx.respondeu = true
@@ -178,6 +185,7 @@ object Celular {
 
     private class Pedido(val etapa: (String) -> Unit, val fim: (String?, String?) -> Unit) {
         @Volatile var ouvindo = false
+        var foco: AudioFocusRequest? = null
     }
 
     @Volatile private var pedido: Pedido? = null
@@ -193,6 +201,9 @@ object Celular {
         val p = Pedido(etapa, fim)
         pedido = p
         if (!CaboCelular.mandar(JSONObject().put("t", "ouvir"))) { pedido = null; return false }
+        // Pausa/abaixa a música da central enquanto o celular ouve (igual ao ouvido próprio): o microfone do celular
+        // ouve melhor e a voz não briga com o som. Volta sozinha quando acaba (texto, erro ou desistência).
+        p.foco = pegarFoco()
         etapa("CHAMANDO O CELULAR")
         // 8 s sem o celular começar a ouvir = usa o ouvido da central. Ouvindo, espera até 20 s no total.
         Rede.principal.postDelayed({ if (pedido === p && !p.ouvindo) desistir(p, "o celular não respondeu em 8 s") }, 8_000)
@@ -208,13 +219,44 @@ object Celular {
     private fun terminar(p: Pedido, texto: String?, problema: String?) {
         if (pedido !== p) return
         pedido = null
+        soltarFoco(p.foco)
         try { p.fim(texto, problema) } catch (e: Exception) { Registro.anotar("ERRO celular ouvir: ${e.message}") }
     }
 
     private fun ouvindoAgora() {
         val p = pedido ?: return
+        if (p.ouvindo) return
         p.ouvindo = true
+        bipe()   // o mesmo sinal do ouvido próprio: "pode falar"
         Rede.naTela { if (pedido === p) p.etapa("OUVINDO (CELULAR)") }
+    }
+
+    private fun pegarFoco(): AudioFocusRequest? {
+        val am = app?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return null
+        return try {
+            val f = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                .build()
+            am.requestAudioFocus(f)
+            f
+        } catch (_: Exception) { null }
+    }
+
+    private fun soltarFoco(f: AudioFocusRequest?) {
+        f ?: return
+        try { (app?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)?.abandonAudioFocusRequest(f) } catch (_: Exception) { }
+    }
+
+    private fun bipe() {
+        Thread({
+            try {
+                val tg = ToneGenerator(AudioManager.STREAM_MUSIC, 70)
+                tg.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
+                Thread.sleep(220)
+                tg.release()
+            } catch (_: Exception) { }
+        }, "celular-bipe").start()
     }
 
     private fun ouviu(ctx: Context, o: JSONObject) {
