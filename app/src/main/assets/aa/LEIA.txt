@@ -1,0 +1,3 @@
+Certificado e chave de REFERÊNCIA do Android Auto ("Google-Android-Reference", emissor "Google Automotive Link",
+válido até 07/07/2044). Públicos: copiados do Headunit Revived (res/raw/cert e privkey, AGPLv3); o mesmo par
+aparece no aasdk/OpenAuto e no headunit original. Não é senha nem chave do Leonardo. Ver NOTICE.md.
