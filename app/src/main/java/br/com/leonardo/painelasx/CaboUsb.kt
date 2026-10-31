@@ -333,7 +333,7 @@ object CaboUsb {
             when {
                 // Com o "usar por padrão" marcado, o Android dá a permissão e abre a CaboActivity logo depois deste
                 // aviso. Pedir agora mostraria o diálogo à toa: confere de novo em 1,5 s.
-                origem == AVISO || origem == SISTEMA -> Rede.principal.postDelayed({ tratar(ctx, d, REVER) }, 1_500)
+                origem == AVISO || origem == SISTEMA || origem == PROCURA -> Rede.principal.postDelayed({ tratar(ctx, d, REVER) }, 1_500)
                 // Sem padrão, o próprio Android já mostra "Abrir com Painel ASX?" (com "usar por padrão"/"Sempre").
                 // Não empilha o nosso diálogo em cima: só pede se, 15 s depois, ninguém respondeu ao dele. A exceção é
                 // o celular em modo "arquivos" (MTP): aí o Android só põe um aviso na barra e quem pergunta somos nós.

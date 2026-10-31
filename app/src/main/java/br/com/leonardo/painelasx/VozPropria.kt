@@ -75,6 +75,7 @@ object VozPropria {
 
     /** Toca a saudação já gravada (não precisa carregar a voz). false = ainda não existe. */
     fun tocarSaudacao(ctx: Context, periodo: String, entao: () -> Unit): Boolean {
+        if (appCtx == null) appCtx = ctx.applicationContext   // a saudação vem antes do preparar(): usa o volume escolhido
         val f = File(ctx.filesDir, "voz/saudacao_$periodo.pcm")
         if (!f.exists() || f.length() < 2000 || !ligada(ctx)) return false
         Thread({
@@ -249,13 +250,25 @@ object VozPropria {
         for (x in pcm) { val a = if (x < 0) -x.toInt() else x.toInt(); if (a > pico) pico = a }
         val limite = 0.95f * 32767f / pico
         val g = minOf(volume(appCtx), limite)
-        if (g <= 1.01f) return pcm
+        if (g in 0.99f..1.01f) return pcm   // abaixo de 1 abaixa ("voz mais baixa"), acima reforça
         return ShortArray(pcm.size) { i -> (pcm[i] * g).toInt().coerceIn(-32767, 32767).toShort() }
     }
 
     private fun tocarPcm(original: ShortArray, taxa: Int) {
         if (original.isEmpty()) return
         val pcm = reforcar(original)
+        // Pede para os outros sons abaixarem enquanto o Jarvis fala (saudação inclusive) e devolve no fim.
+        val am = appCtx?.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+        val foco = try {
+            android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()).build()
+                .also { am?.requestAudioFocus(it) }
+        } catch (_: Exception) { null }
+        try { tocarComTrilha(pcm, taxa) } finally { try { if (foco != null) am?.abandonAudioFocusRequest(foco) } catch (_: Exception) { } }
+    }
+
+    private fun tocarComTrilha(pcm: ShortArray, taxa: Int) {
         // Pelo canal da MÚSICA: segue o botão de volume que o Leonardo gira (o canal de navegação da NWD fica baixo).
         val at = AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder()
