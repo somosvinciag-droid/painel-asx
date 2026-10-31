@@ -39,8 +39,9 @@ object Clima {
         return m < n || m >= p
     }
 
-    fun atualizarSePreciso(ctx: Context) {
-        if (System.currentTimeMillis() - atualizadoEm < 30 * 60_000) return
+    fun atualizarSePreciso(ctx: Context, idadeMaxMs: Long = 30 * 60_000L) {
+        val idade = System.currentTimeMillis() - atualizadoEm
+        if (idade in 0 until idadeMaxMs) return   // (relógio da central voltou no tempo: atualiza)
         atualizar(ctx)
     }
 

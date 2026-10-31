@@ -157,9 +157,20 @@ object Diario {
         return "Abastecimento anotado: ${partes.joinToString(", ")}.$consumo"
     }
 
+    // A tela do carro pergunta consumo e custo a cada 5 s: guarda a lista já lida até ela mudar (só para leitura).
+    @Volatile private var lidaTexto: String? = null
+    @Volatile private var lida: JSONArray = JSONArray()
+    private fun abastecimentosParaLer(ctx: Context): JSONArray {
+        val t = p(ctx).getString("abastecimentos", null) ?: "[]"
+        if (t == lidaTexto) return lida
+        val a = try { JSONArray(t) } catch (_: Exception) { JSONArray() }
+        lida = a; lidaTexto = t
+        return a
+    }
+
     /** Consumo médio do último tanque (km/l), calculado pelos abastecimentos falados. */
     fun consumoMedio(ctx: Context): Double? {
-        val l = abastecimentos(ctx)
+        val l = abastecimentosParaLer(ctx)
         for (i in l.length() - 1 downTo 0) {
             val o = l.optJSONObject(i) ?: continue
             if (o.has("km_por_litro")) return o.optDouble("km_por_litro")
@@ -170,7 +181,7 @@ object Diario {
     /** (custo por km em R$, preço do litro) com o último preço e o último consumo conhecidos. */
     fun custoPorKm(ctx: Context): Pair<Double, Double>? {
         val kml = consumoMedio(ctx) ?: return null
-        val l = abastecimentos(ctx)
+        val l = abastecimentosParaLer(ctx)
         for (i in l.length() - 1 downTo 0) {
             val o = l.optJSONObject(i) ?: continue
             if (o.has("preco_litro")) {
@@ -218,6 +229,12 @@ object Fila {
         }
         val app = ctx.applicationContext
         Rede.emSegundoPlano("fila") { esvaziar(app) }
+    }
+
+    /** Tem alguma coisa esperando para ir ao servidor? */
+    fun temAlgo(ctx: Context): Boolean {
+        val t = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("fila", null) ?: return false
+        return t.length > 2   // "[]" = vazia
     }
 
     /** Manda o que está na fila (um envio de cada vez; se já estiver enviando, não faz nada). */

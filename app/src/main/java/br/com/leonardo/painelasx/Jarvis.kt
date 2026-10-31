@@ -99,7 +99,8 @@ object Jarvis {
             saudando = false
             Rede.emSegundoPlano("partida") {
                 // 2) Depois: tempo e lembretes (com a voz carregada), Turbo e a música.
-                Clima.atualizar(app)
+                // Previsão de menos de 10 min atrás serve (a central dorme e acorda várias vezes seguidas).
+                Clima.atualizarSePreciso(app, 10 * 60_000L)
                 val frase = StringBuilder()
                 if (primeiraDoDia && Clima.temperatura != null) {
                     frase.append("Lá fora, ${Clima.temperatura} graus, ${Clima.descricao}.")
@@ -188,7 +189,7 @@ object Jarvis {
             .put("hora", java.text.SimpleDateFormat("EEEE, dd/MM HH:mm", java.util.Locale("pt", "BR")).format(java.util.Date()))
             .put("velocidade_kmh", Carro.velocidadeKmh.toInt())
             .put("clima", Clima.curto())
-            .put("km_hoje", Viagens.resumo(1).optDouble("km_total"))
+            .put("km_hoje", Viagens.resumo(1, comLista = false).optDouble("km_total"))
             .put("musica", Musica.tocandoAgora(ctx) ?: "")
         Carro.ultimaPosicao?.let { contexto.put("lat", Math.round(it.latitude * 1000) / 1000.0).put("lon", Math.round(it.longitude * 1000) / 1000.0) }
         return try {

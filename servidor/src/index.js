@@ -42,6 +42,22 @@ function iguais(a, b) {
   return d === 0;
 }
 
+// O app manda os corpos grandes (diagnóstico, backup, respostas) comprimidos com gzip para gastar menos
+// internet do celular. Só faz isso depois de o relatório responder "gzip: true". Se o corpo já chegar
+// descomprimido (sem a marca 1f 8b do gzip), usa como veio.
+async function descomprimir(request) {
+  if (request.method !== 'POST') return request;
+  if ((request.headers.get('Content-Encoding') || '').toLowerCase() !== 'gzip') return request;
+  let corpo = new Uint8Array(await request.arrayBuffer());
+  if (corpo.length > 2 && corpo[0] === 0x1f && corpo[1] === 0x8b) {
+    corpo = new Uint8Array(await new Response(new Response(corpo).body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+  }
+  const h = new Headers(request.headers);
+  h.delete('Content-Encoding');
+  h.delete('Content-Length');
+  return new Request(request.url, { method: 'POST', headers: h, body: corpo });
+}
+
 function horaBR(ms) {
   if (!ms) return 'nunca';
   return new Date(ms).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
@@ -64,6 +80,7 @@ export class Central {
       if (p === '/app/recuperar') return await this.recuperar(request);
       if (p.startsWith('/app/')) {
         if (!(await this.appAutorizado(request))) return json({ erro: 'nao autorizado' }, 403);
+        request = await descomprimir(request);
         if (p === '/app/relatorio') return await this.relatorio(request);
         if (p === '/app/comandos') return await this.comandos();
         if (p === '/app/resultado') return await this.resultado(request);
@@ -123,7 +140,8 @@ export class Central {
       gravar.registro = reg.slice(-MAX_REGISTRO);
     }
     await this.ctx.storage.put(gravar);
-    return json({ ok: true, jarvis: !!this.env.ANTHROPIC_API_KEY, atlas: !!(this.env.ANTHROPIC_API_KEY && this.env.ATLAS_MCP_URL) });
+    // gzip: o app (v23+) pode mandar os corpos grandes comprimidos (ver descomprimir).
+    return json({ ok: true, gzip: true, jarvis: !!this.env.ANTHROPIC_API_KEY, atlas: !!(this.env.ANTHROPIC_API_KEY && this.env.ATLAS_MCP_URL) });
   }
 
   // ------------------------------------------------------------------ diário (anotações, abastecimentos)

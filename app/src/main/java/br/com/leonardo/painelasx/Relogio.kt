@@ -19,7 +19,6 @@ object Relogio {
     private var h: Handler? = null
     private var appCtx: Context? = null
     private var ultimoTurbo = 0L
-    private var ultimoBackup = 0L
     private var noite: Boolean? = null
     private var minuto = 0
 
@@ -39,12 +38,15 @@ object Relogio {
             passo("clima") { Clima.atualizarSePreciso(ctx) }
             passo("noite") { modoNoite(ctx) }
             // Fora da linha do relógio: com a internet fraca o envio pode demorar minutos.
-            passo("fila") { if (Conector.online) Rede.emSegundoPlano("fila") { Fila.esvaziar(ctx) } }
+            // (Só cria a linha de envio se houver algo na fila: antes criava uma por minuto à toa.)
+            passo("fila") { if (Conector.online && Fila.temAlgo(ctx)) Rede.emSegundoPlano("fila") { Fila.esvaziar(ctx) } }
             passo("backup") {
+                // A hora do último backup fica guardada: a central fecha o app ao dormir, e antes cada vez que o app
+                // abria o backup inteiro ia de novo depois de 10 min (não de 6 em 6 h). Se nada mudou, nem manda.
                 val agora = System.currentTimeMillis()
-                if (Conector.online && (if (ultimoBackup == 0L) minuto >= 10 else agora - ultimoBackup > 6 * 3600_000L)) {
-                    ultimoBackup = agora
-                    Backup.enviar(ctx)
+                val ultimo = Backup.ultimoEnvio(ctx)
+                if (Conector.online && minuto >= 10 && (agora - ultimo > 6 * 3600_000L || ultimo > agora)) {
+                    Backup.enviar(ctx, automatico = true)
                 }
             }
             h?.postDelayed(this, 60_000)
