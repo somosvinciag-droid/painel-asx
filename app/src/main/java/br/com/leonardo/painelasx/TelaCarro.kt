@@ -355,16 +355,18 @@ class TelaCarro : Activity() {
             return ic
         }
         // Música tocando na própria central (Spotify Connect): a tecla de mídia vai direto para ela (na hora).
-        // Senão, com o celular ligado, o controle vai para ele; sem celular, a tecla de mídia de sempre.
+        // Senão: Android Auto pelo cabo (teclas pelo canal de entrada); senão o app do celular; senão a tecla de sempre.
         botao(Icone.ANTERIOR, false) {
-            if (Musica.centralTocando(this) || !Celular.controle("anterior")) Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+            if (Musica.centralTocando(this) || !(AndroidAuto.controle("anterior") || Celular.controle("anterior")))
+                Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_PREVIOUS)
         }
         playIcone = botao(Icone.PAUSA, true) {
-            if (!Musica.pararRadio() && (Musica.centralTocando(this) || !Celular.controle("alternar")))
+            if (!Musica.pararRadio() && (Musica.centralTocando(this) || !(AndroidAuto.controle("alternar") || Celular.controle("alternar"))))
                 Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
         }
         botao(Icone.PROXIMA, false) {
-            if (Musica.centralTocando(this) || !Celular.controle("proxima")) Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_NEXT)
+            if (Musica.centralTocando(this) || !(AndroidAuto.controle("proxima") || Celular.controle("proxima")))
+                Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_NEXT)
         }
         dir.addView(ctrl, lp(MATCH, px(80)).apply { topMargin = px(14) })
 
@@ -407,6 +409,9 @@ class TelaCarro : Activity() {
                 progresso.mostrar(if (t.duracaoMs > 0) (t.posicaoMs.toFloat() / t.duracaoMs).coerceIn(0f, 1f) else 0f)
                 playIcone.tipo = if (t.tocando) Icone.PAUSA else Icone.PLAY
             }
+            // Próxima curva do Android Auto: discreta, no rótulo pequeno embaixo do Jarvis (no lugar dos km do dia).
+            val nav = AndroidAuto.navegacaoTexto()
+            if (nav.isNotEmpty()) detalhe.por(nav)
         }
         if (tique % 5 == 0) {
             val cel = Celular.bateriaCurta()
@@ -422,7 +427,7 @@ class TelaCarro : Activity() {
             val d = Viagens.resumo(1, comLista = false)
             val km = "%.1f".format(BR, d.optDouble("km_total", 0.0))
             val manut = try { Diario.manutencao(this).firstOrNull { it.second }?.first } catch (_: Exception) { null }
-            detalhe.por("Hoje $km km em ${d.optInt("viagens")} viagens." + (manut?.let { " ${it.replaceFirstChar { c -> c.uppercase() }}." } ?: ""))
+            if (AndroidAuto.navegacaoTexto().isEmpty()) detalhe.por("Hoje $km km em ${d.optInt("viagens")} viagens." + (manut?.let { " ${it.replaceFirstChar { c -> c.uppercase() }}." } ?: ""))
         }
         if (tique % 30 == 0) Rede.emSegundoPlano("tela-inicial") {
             val ja = Nwd.somosTelaInicial(this)
@@ -447,16 +452,18 @@ class TelaCarro : Activity() {
     // ---------------------------------------------------------------- voz
 
     private fun ouvir() {
-        if (Ouvido.ouvindo || Celular.ouvindo) return
-        // Celular ligado: ele ouve (Google, pt-BR) e manda o texto. Erro ou 8 s sem resposta: ouvido da central.
-        val pediu = Celular.ouvir({ etapa ->
+        if (Ouvido.ouvindo || FontesDeVoz.algumaOuvindo) return
+        // O FALAR é sempre do Jarvis. Fonte de fora (app do celular) ouve e manda o texto; erro ou 8 s sem resposta:
+        // ouvido da central. Com o Android Auto pelo cabo: ouvido da central (ver FonteDeVoz).
+        val fonte = FontesDeVoz.escolher() ?: run { ouvirNaCentral(); return }
+        val pediu = fonte.ouvir({ etapa ->
             estadoJarvis.text = "JARVIS · $etapa"
             estadoJarvis.setTextColor(VERMELHO)
         }) { texto, _ ->
             estadoJarvis.setTextColor(CINZA)
             if (texto != null) {
                 estadoJarvis.text = "OUVI: " + texto.uppercase().take(42)
-                relogio.postDelayed({ if (!Ouvido.ouvindo && !Celular.ouvindo) estadoJarvis.text = "JARVIS" }, 8000)
+                relogio.postDelayed({ if (!Ouvido.ouvindo && !FontesDeVoz.algumaOuvindo) estadoJarvis.text = "JARVIS" }, 8000)
                 executar(texto)
             } else {
                 estadoJarvis.text = "JARVIS"
