@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "painel-asx"
 include(":app")
+include(":celular")
