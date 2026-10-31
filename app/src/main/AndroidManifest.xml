@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -22,6 +23,9 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Ouvido próprio do Jarvis (botão FALAR), sem internet. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- "Acesso ao uso": ver que apps abriram na partida (só leitura; o Leonardo liga uma vez nos ajustes). -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <queries>

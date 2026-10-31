@@ -501,6 +501,15 @@ class MainActivity : Activity() {
                 setOnClickListener { requestPermissions(arrayOf(Manifest.permission.CAMERA), 9) }
             }, alto())
         }
+        if (!Partida.temAcesso(this)) {
+            falta = true
+            permissoes.addView(botao("Ver o que abre junto na partida (acesso ao uso)", BOTAO, TEXTO, 15f).apply {
+                setOnClickListener {
+                    try { startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) } catch (_: Exception) { }
+                    mostrar("Ligue o \"Painel ASX\" na lista e volte.", falar = false)
+                }
+            }, alto())
+        }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             falta = true
             permissoes.addView(botao("Permitir GPS (velocidade e viagens)", BOTAO, TEXTO, 16f).apply {

@@ -42,6 +42,9 @@ object Diagnostico {
             SUSPEITOS.any { s -> partes.any { it == s || (s.length > 3 && it.contains(s)) } }
         }.forEach { sb.append(it).append('\n') }
 
+        sb.append("\n--- abriu na partida ---\n")
+        sb.append(try { Partida.texto(ctx) } catch (e: Exception) { "(não consegui ler: ${e.javaClass.simpleName})\n" })
+
         sb.append("\n--- o que aconteceu (últimas 120 linhas) ---\n")
         Registro.ultimas(120).forEach { sb.append(it).append('\n') }
         return sb.toString()
