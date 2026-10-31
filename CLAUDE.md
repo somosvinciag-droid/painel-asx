@@ -104,3 +104,14 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
 - `Nwd.tecla` aperta voltar/início/volume pela MCU sem Acessibilidade. `Nwd.relatorio` (em `dados_do_carro`, campo "nwd")
   traz as props do "passo 0" do root (só leitura: ro.debuggable, ro.build.type, verifiedbootstate, treble...) e as regras da NWD.
 - Root/firmware próprio: só com cópia completa + arquivo oficial (.pac); trocar o Android inteiro perde rádio, ré, BT e volante.
+
+## v20: tela do carro "F3 · Gran Turismo"
+
+- Escolhida pelo Leonardo entre 9 desenhos (prancheta "Tela do Carro: novas versões" e "Galeria da Tela do Carro").
+  Faixa verde-branco-vermelho; 2/3 à esquerda (velocidade fina, barra até o limite, CONSUMO km/l e CUSTO R$/km, Jarvis + FALAR,
+  destinos Casa/Mineirita/Família/Apps); 1/3 à direita a música (capa, tempo, botões grandes).
+- Desenhada em 1280×720 e escalada (`s`) para a tela; fonte Big Shoulders Display (OFL) em `assets/fontes/`.
+- Consumo: `Diario.consumoMedio` (último `km_por_litro` dos abastecimentos falados) e `Diario.custoPorKm`. Consumo
+  instantâneo só com leitor OBD2 (suspenso). Comando de voz "consumo"/"quanto está o consumo".
+- Música: `Musica.tocando` (título, artista, capa, posição) pela sessão de mídia (precisa do acesso às notificações).
+- A voz do Jarvis continua a mesma (faber + grave 0,86): o Leonardo testou outras e preferiu manter.

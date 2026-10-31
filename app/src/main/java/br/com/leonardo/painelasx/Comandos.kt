@@ -135,6 +135,13 @@ object Comandos {
         if (Regex("(troquei|trocamos|fiz) (o |a )?(troca (de|do) )?(fluido|oleo) (do )?(cambio|cvt)").containsMatchIn(t)) return Diario.servicoFeito(ctx, "cvt")
         if (Regex("(fiz|fizemos) (o |a )?(alinhamento|balanceamento|rodizio)|troquei (os )?pneus").containsMatchIn(t)) return Diario.servicoFeito(ctx, "pneus")
         if (Regex("^(calibrei|calibramos|enchi)( os)? pneus").containsMatchIn(t)) return Diario.calibrou(ctx)
+        if (t == "consumo" || t.contains("quanto esta o consumo") || t.contains("qual o consumo") || t.contains("km por litro") || t.contains("quilometros por litro") || t.contains("quanto estou gastando")) {
+            val kml = Diario.consumoMedio(ctx) ?: return "Ainda não sei o consumo, senhor. Fale quando abastecer, por exemplo: abasteci 40 litros, 230 reais."
+            val ck = Diario.custoPorKm(ctx)
+            val br = java.util.Locale("pt", "BR")
+            return "O consumo médio do último tanque foi de ${"%.1f".format(br, kml)} quilômetros por litro." +
+                (ck?.let { " Cada quilômetro está custando ${"%.2f".format(br, it.first)} reais." } ?: "")
+        }
         if (t == "manutencao" || t.contains("proxima revisao") || t.contains("como esta a manutencao") || t.contains("quando troco o oleo")) {
             return Diario.manutencaoTexto(ctx)
         }

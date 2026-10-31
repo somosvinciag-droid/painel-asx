@@ -157,6 +157,30 @@ object Diario {
         return "Abastecimento anotado: ${partes.joinToString(", ")}.$consumo"
     }
 
+    /** Consumo médio do último tanque (km/l), calculado pelos abastecimentos falados. */
+    fun consumoMedio(ctx: Context): Double? {
+        val l = abastecimentos(ctx)
+        for (i in l.length() - 1 downTo 0) {
+            val o = l.optJSONObject(i) ?: continue
+            if (o.has("km_por_litro")) return o.optDouble("km_por_litro")
+        }
+        return null
+    }
+
+    /** (custo por km em R$, preço do litro) com o último preço e o último consumo conhecidos. */
+    fun custoPorKm(ctx: Context): Pair<Double, Double>? {
+        val kml = consumoMedio(ctx) ?: return null
+        val l = abastecimentos(ctx)
+        for (i in l.length() - 1 downTo 0) {
+            val o = l.optJSONObject(i) ?: continue
+            if (o.has("preco_litro")) {
+                val preco = o.optDouble("preco_litro")
+                if (kml > 0) return (preco / kml) to preco
+            }
+        }
+        return null
+    }
+
     fun abastecimentos(ctx: Context): JSONArray = try {
         JSONArray(p(ctx).getString("abastecimentos", null) ?: "[]")
     } catch (_: Exception) { JSONArray() }
