@@ -241,6 +241,11 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
 O "ZLink nosso": o próprio Painel é o receptor de Android Auto (AA) pelo cabo. Modo do cabo PADRÃO "Android Auto pelo
 Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica como opção secundária; "ZLink" (`MODO_ZLINK`)
 = o Painel não mexe no cabo. Só cabo (sem Bluetooth, sem Wi-Fi). Configura uma vez ("usar por padrão" do USB) e pronto.
+- Decisão do Leonardo (31/10): ele NÃO usa o Android Auto do ZLink. Não há "Android Auto de hoje" a preservar: o padrão
+  "Android Auto pelo Painel" vale direto desde a publicação, sem toque extra e sem regra para devolver o cabo ao ZLink.
+  A opção "ZLink" continua no seletor, sem prioridade. O que é obrigatório: cabo que não responde não trava o Painel e não
+  fica pedindo permissão (no máximo 4 pedidos seguidos; celular que nunca responde ou que responde e cai logo 8 vezes
+  seguidas = largado até o cabo ser solto, só com aviso e registro).
 
 ### Desenho
 - `CaboUsb` manda o celular para o modo acessório com a identidade do AA (`TEXTOS_AA`: "Android"/"Android Auto"/"2.0.1"/
@@ -303,10 +308,32 @@ Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica
 - Risco: o Google pode deixar de aceitar esse certificado (ou mudar o AA, como fez com o sem fio no AA 17.4+). Aí todos os
   receptores abertos param juntos. O certificado do lado do celular vence em 31/12/2026 (não conferimos, como o HUR).
 
+### Revisão independente (31/10, ramo `rascunho-receptor`)
+- `AaSom`: o "parar" do celular (fim do som) NÃO corta mais o fim da voz do GPS (a linha do som toca o que já chegou e só
+  então `AudioTrack.stop()`); foco negado tenta de novo de 2 em 2 s (antes a música ficava muda até o celular recomeçar);
+  depois de perder o foco de vez (outro app na central), o foco volta quando o celular recomeça a mandar som após >1,5 s
+  de pausa; `AudioTrack` que não abre não derruba a conversa (fica sem som naquele canal); a linha do som termina antes
+  do `release()`.
+- `AaTls`/`AaSessao`: registros de controle do TLS (TLS 1.3 KeyUpdate) saem na ordem da numeração (`cifrarComControle`,
+  a leitura só acorda a escrita); antes uma troca de chave com tráfego nos dois sentidos derrubava a conexão (reproduzido
+  no teste). Bytes do aperto de mão que chegam abertos depois do TLS (ticket do TLS 1.3) partidos entre quadros ficam
+  guardados até o resto chegar (antes: "unwrap BUFFER_UNDERFLOW" e queda). Erro do lado da central ao tratar UMA
+  mensagem (som, tela) vira "ERRO aa: ao tratar…" no registro e a conversa segue.
+- `CaboUsb.caboTerminou`: responde mas cai em < 20 s mais de `MAX_QUEDAS` (8) vezes seguidas = larga até soltar.
+- Riscos que continuam (só o carro responde): foco de vídeo NATIVO desde o início (válido no protocolo: é como um carro de
+  fábrica que fica na tela dele até o motorista escolher o Android Auto, mas nenhum receptor aberto de referência faz
+  isso; o HUR sempre projeta); `escreverBruto` repete por até 3 s uma escrita USB que falhou (o HUR desiste na 1ª, menos a
+  versão): se o USB tiver mandado só parte, o celular cai e a central reconecta; ping da central de 5 em 5 s (o HUR não
+  manda; o aasdk/OpenAuto manda).
+
 ### Testes JVM (fora do repo)
 - `scratchpad/receptor/rodar.sh`: compila `AaProto/AaMensagens/AaQuadro/AaTls/AaSessao` com o kotlinc e roda 145 testes:
   protobuf igual ao protobuf OFICIAL (bytes gerados em Python com os .proto do HUR, nos dois sentidos), quadros/pedaços,
   e uma conversa completa com um "celular falso" (TLS 1.2 e 1.3 de verdade, cabo entregando em pedaços aleatórios).
+  Revisão (31/10): +29 testes (174 no total) — TLS do celular partido entre quadros (1.2 e 1.3), as 4 respostas de foco
+  de áudio, confirmações (dados sim, codec não), canais fora de ordem, protobuf quebrado/tipos e canais desconhecidos/
+  microfone pedido, erros do lado da central, tchau/parar duas vezes, celular mudo, escrita recusada, lixo e quadro
+  gigante; e uma 2ª execução com KeyUpdate a cada 16 KB (`keylimits.properties`, 400 pacotes de som + teclas).
 
 ### O que só o teste no carro responde
 - Se o ZLink pega o cabo antes (caso A/B; ver o diagnóstico "--- cabo USB ---") e se o "usar por padrão" segura.
