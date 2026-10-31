@@ -93,8 +93,21 @@ class Ponte : Service() {
 
         // ------------------------------------------------------------ conexões
 
+        /** Conexões abertas agora (a central usa 1; um aparelho intruso na rede não abre centenas). */
+        private val abertas = java.util.concurrent.atomic.AtomicInteger(0)
+        private const val MAX_CONEXOES = 4
+
         private fun novaConexao(canal: Canal) {
-            val c = Conexao(canal, 0, 20_000, { cx, o -> h.post { tratar(cx, o) } }, { cx, m -> h.post { caiu(cx, m) } })
+            if (abertas.incrementAndGet() > MAX_CONEXOES) {
+                abertas.decrementAndGet()
+                canal.fechar()
+                return
+            }
+            val c = Conexao(canal, 0, 20_000, { cx, o ->
+                h.post {
+                    try { tratar(cx, o) } catch (e: Exception) { cx.fechar("erro: ${e.javaClass.simpleName}") }
+                }
+            }, { cx, m -> abertas.decrementAndGet(); h.post { caiu(cx, m) } })
             Thread({ c.rodar("ponte-${canal.tipo}") }, "ponte-${canal.tipo}").start()
             // A central tem de dizer "olá" (com o id dela) em 10 s.
             h.postDelayed({ if (c.viva && c !== ativa && c !== pendente) c.fechar("sem olá") }, 10_000)
