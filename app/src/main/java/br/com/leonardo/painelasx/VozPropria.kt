@@ -143,13 +143,14 @@ object VozPropria {
                         if (!f.canonicalPath.startsWith(dir.canonicalPath)) throw Exception("zip estranho")
                         if (e.isDirectory) f.mkdirs() else {
                             f.parentFile?.mkdirs()
-                            FileOutputStream(f).use { z.copyTo(it) }
+                            // fsync: a central perde energia de repente; sem isso o "ok" podia ficar com um modelo cortado.
+                            FileOutputStream(f).use { z.copyTo(it); it.fd.sync() }
                         }
                         e = z.nextEntry
                     }
                 }
                 zip.delete()
-                ok.writeText("1")
+                Arquivo.gravarSeguro(ok, "1")
                 Registro.anotar("voz própria: pacote instalado")
             }
             estado = "carregando"
