@@ -455,10 +455,14 @@ object Ouvido {
             if (pareciaMudo) Registro.anotar("ouvido: o microfone parece mudo (nível ${"%.4f".format(maior)})")
             if (!comecou) return null
             val total = todo.sumOf { it.size }
-            val saida = FloatArray(total)
+            val tudo = FloatArray(total)
             var p = 0
-            for (f in todo) { System.arraycopy(f, 0, saida, p, f.size); p += f.size }
-            return saida
+            for (f in todo) { System.arraycopy(f, 0, tudo, p, f.size); p += f.size }
+            // Corta o silêncio do começo (do bipe até ele começar a falar), deixando 0,9 s antes da fala:
+            // o Whisper processa cada segundo de áudio, e na central isso custa ~0,2 s por segundo de silêncio.
+            // (Testado: o acerto fica igual.)
+            val inicio = (inicioFala - 14_400).coerceIn(0, total)
+            return if (inicio > 0) tudo.copyOfRange(inicio, total) else tudo
         } finally {
             try { am.abandonAudioFocusRequest(foco) } catch (_: Exception) { }
         }
