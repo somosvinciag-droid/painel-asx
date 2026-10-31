@@ -68,7 +68,7 @@ object Registro {
             gravacaoMarcada.set(false)
             val copia = synchronized(this) { linhas.joinToString("\n") }
             try {
-                arquivo?.writeText(copia)
+                arquivo?.let { Arquivo.gravarSeguro(it, copia) }
             } catch (_: Exception) {
             }
         }, 5, TimeUnit.SECONDS)
@@ -81,7 +81,7 @@ object Registro {
     @Synchronized
     fun gravarAgora() {
         try {
-            arquivo?.writeText(linhas.joinToString("\n"))
+            arquivo?.let { Arquivo.gravarSeguro(it, linhas.joinToString("\n"), ".quebrou") }
         } catch (_: Exception) {
         }
     }

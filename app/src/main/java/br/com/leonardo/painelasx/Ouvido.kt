@@ -24,9 +24,6 @@ import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
 import java.io.File
 import java.io.FileOutputStream
-import java.io.RandomAccessFile
-import java.net.HttpURLConnection
-import java.net.URL
 
 /**
  * Ouvido próprio do Jarvis: entende a fala do Leonardo DENTRO da central, sem internet.
@@ -54,6 +51,47 @@ object Ouvido {
     private fun dir(ctx: Context) = File(ctx.filesDir, "ouvido")
     /** Os arquivos já estão todos na central. */
     fun baixado(ctx: Context) = File(dir(ctx), "ok").exists()
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("config", Context.MODE_PRIVATE)
+
+    /**
+     * Tamanho certo de cada arquivo (o "ok" guarda "nome=tamanho"). Vazio = "ok" antigo, sem tamanhos.
+     * O motor (sherpa-onnx) FECHA o app inteiro se o modelo estiver cortado, por isso confere antes de carregar.
+     */
+    private fun tamanhosCertos(ctx: Context): Map<String, Long> = try {
+        File(dir(ctx), "ok").readLines().mapNotNull { l ->
+            val p = l.split("="); if (p.size == 2) p[1].trim().toLongOrNull()?.let { p[0].trim() to it } else null
+        }.toMap()
+    } catch (_: Exception) { emptyMap() }
+
+    /** Apaga os arquivos que estão faltando ou com tamanho errado. true = estava tudo certo. */
+    private fun conferirArquivos(ctx: Context): Boolean {
+        val certos = tamanhosCertos(ctx)
+        if (certos.isEmpty()) return ARQUIVOS.all { File(dir(ctx), it).exists() }
+        var tudoCerto = true
+        for (nome in ARQUIVOS) {
+            val f = File(dir(ctx), nome)
+            if (!f.exists() || f.length() != certos[nome]) {
+                Registro.anotar("ERRO ouvido: $nome estragado (${f.length()} de ${certos[nome]} bytes); vou baixar de novo")
+                f.delete(); tudoCerto = false
+            }
+        }
+        if (!tudoCerto) File(dir(ctx), "ok").delete()
+        return tudoCerto
+    }
+
+    /**
+     * Quantas vezes o app fechou no meio de carregar o ouvido (nesta versão do app).
+     * O marcador "carregando" fica no disco durante a carga: se ainda existe quando o app abre, a carga derrubou o app.
+     */
+    private fun quebras(ctx: Context): Int {
+        val p = prefs(ctx)
+        if (p.getInt("ouvido_quebras_versao", 0) != BuildConfig.VERSION_CODE) return 0
+        return p.getInt("ouvido_quebras", 0)
+    }
+    private fun mudarQuebras(ctx: Context, n: Int) {
+        prefs(ctx).edit().putInt("ouvido_quebras", n).putInt("ouvido_quebras_versao", BuildConfig.VERSION_CODE).commit()
+    }
+    private fun marcador(ctx: Context) = File(dir(ctx), "carregando")
     fun temPermissao(ctx: Context) = ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     fun preparar(ctx: Context) {
@@ -66,6 +104,7 @@ object Ouvido {
 
     /** Frase para o Leonardo quando ainda não dá para ouvir. */
     fun explicacao(): String = when {
+        estado.startsWith("baixando a voz") -> "Estou baixando as bibliotecas da voz, que o meu ouvido também usa, senhor. Fica pronto uma vez só."
         estado.startsWith("baixando") -> "Ainda estou baixando o meu ouvido, senhor. Está em ${estado.substringAfter("baixando ").trim()}. Fica pronto uma vez só."
         estado.startsWith("esperando") -> "Meu ouvido está esperando a internet para baixar, senhor."
         estado.startsWith("erro") -> "Meu ouvido deu um problema, senhor. Peça ao Claude para olhar o registro."
@@ -74,13 +113,26 @@ object Ouvido {
 
     // ------------------------------------------------------------------ baixar e carregar
 
+    private var conferiuQuebra = false
+
     private fun baixarECarregar(ctx: Context) {
         try {
-            val vozOk = File(ctx.filesDir, "voz/ok").exists()
-            if (!vozOk) {
-                estado = "esperando a voz própria"
-                h?.postDelayed({ baixarECarregar(ctx) }, 60_000)
-                return
+            if (!conferiuQuebra) {
+                conferiuQuebra = true
+                if (marcador(ctx).exists()) {
+                    marcador(ctx).delete()
+                    val n = quebras(ctx) + 1
+                    mudarQuebras(ctx, n)
+                    Registro.anotar("ERRO ouvido: o app fechou enquanto eu carregava o ouvido ($n vez(es)); confiro os arquivos")
+                    if (!conferirArquivos(ctx)) mudarQuebras(ctx, 0)  // arquivo cortado: baixa de novo e tenta outra vez
+                }
+            }
+            if (!File(ctx.filesDir, "voz/ok").exists()) {
+                // O ouvido usa as bibliotecas do pacote da voz própria ("voz-1"). Com a voz do Google escolhida,
+                // a voz própria não baixa nada e o ouvido ficava para sempre esperando: o próprio ouvido baixa
+                // o pacote (uma vez só). Se a voz própria já estiver baixando, só espera ela terminar (sem baixar 2 vezes).
+                estado = "baixando a voz (o ouvido usa as bibliotecas dela)"
+                VozPropria.baixarPacote(ctx)
             }
             if (!baixado(ctx)) {
                 val d = dir(ctx); d.mkdirs()
@@ -92,23 +144,62 @@ object Ouvido {
                 Registro.anotar("ouvido: baixando (~160 MB, uma vez só)")
                 for ((i, nome) in ARQUIVOS.withIndex()) {
                     val f = File(d, nome)
-                    if (f.exists()) continue
-                    baixar("https://github.com/${BuildConfig.REPO}/releases/download/$PACOTE/$nome", f) { pct ->
+                    if (f.exists()) continue   // só existe depois de baixado inteiro (conferido pelo tamanho)
+                    Arquivo.baixar("https://github.com/${BuildConfig.REPO}/releases/download/$PACOTE/$nome", f) { pct ->
                         estado = "baixando ${(i * 100 + pct) / ARQUIVOS.size}%"
                     }
                 }
-                File(d, "ok").writeText("1")
+                // "ok" com o tamanho de cada arquivo, gravado com segurança (a central perde energia de repente).
+                Arquivo.gravarSeguro(File(d, "ok"), ARQUIVOS.joinToString("\n") { "$it=${File(d, it).length()}" } + "\n")
                 Registro.anotar("ouvido: arquivos baixados")
             }
-            // Carrega já se houver memória sobrando; senão, carrega no primeiro toque em FALAR.
-            if (memoriaLivreMb(ctx) > 550) carregar(ctx) else {
-                estado = "pronto (carrega ao falar)"
-                Registro.anotar("ouvido: pronto; carrego quando o senhor falar (memória curta)")
+            when {
+                quebras(ctx) >= 2 -> {
+                    estado = "erro: o ouvido fechou o app 2 vezes ao carregar"
+                    Registro.anotar("ERRO ouvido: desligado nesta versão (fechou o app 2 vezes ao carregar)")
+                }
+                // Já fechou o app uma vez: não carrega sozinho (só quando ele tocar em FALAR).
+                quebras(ctx) == 1 -> estado = "pronto (carrega ao falar)"
+                // Pré-carrega (se houver memória sobrando) só depois que a partida assentar; senão, no primeiro FALAR.
+                memoriaLivreMb(ctx) > 550 -> preCarregarDepoisDaPartida(ctx)
+                else -> {
+                    estado = "pronto (carrega ao falar)"
+                    Registro.anotar("ouvido: pronto; carrego quando o senhor falar (memória curta)")
+                }
             }
         } catch (e: Throwable) {
             estado = "esperando a internet"
             Registro.anotar("ouvido: não baixou agora (${e.javaClass.simpleName}: ${e.message}); tento de novo em 5 min")
             h?.postDelayed({ baixarECarregar(ctx) }, 5 * 60_000)
+        }
+    }
+
+    /**
+     * Pré-carga do ouvido (pesada: ~2 s de processador e muita memória). Espera a partida assentar: a saudação
+     * terminar e no mínimo 20 s desde que o app começou, o que vier por último (no máximo 60 s esperando a saudação).
+     * Se ele tocar em FALAR antes, o ouvir() carrega na hora; quando esta pré-carga rodar, já está carregado.
+     * Roda na linha "ouvido" sem prender a linha (só reagenda).
+     */
+    private fun preCarregarDepoisDaPartida(ctx: Context) {
+        val desdeInicio = SystemClock.elapsedRealtime() - App.inicio
+        val falta = when {
+            desdeInicio < 20_000 -> 20_000 - desdeInicio
+            Jarvis.saudando && desdeInicio < 60_000 -> 1_000L
+            else -> 0L
+        }
+        if (falta > 0) {
+            estado = "pronto (carrega depois da partida)"
+            h?.postDelayed({ preCarregarDepoisDaPartida(ctx) }, falta)
+            return
+        }
+        if (rec != null) { estado = "pronto"; return }
+        if (ouvindo) return   // o FALAR está carregando/ouvindo agora
+        if (memoriaLivreMb(ctx) > 550) {
+            Registro.anotar("ouvido: pré-carga ${desdeInicio / 1000} s depois de o app começar")
+            carregar(ctx)
+        } else {
+            estado = "pronto (carrega ao falar)"
+            Registro.anotar("ouvido: pronto; carrego quando o senhor falar (memória curta)")
         }
     }
 
@@ -121,13 +212,17 @@ object Ouvido {
     /** Roda na linha "ouvido". */
     private fun carregar(ctx: Context) {
         if (rec != null) return
+        if (quebras(ctx) >= 2) { estado = "erro: o ouvido fechou o app 2 vezes ao carregar"; return }
         estado = "carregando"
         val t0 = SystemClock.elapsedRealtime()
         try {
+            // Arquivo cortado faz o motor fechar o app (não dá para pegar o erro): confere o tamanho antes.
+            if (!conferirArquivos(ctx)) throw IllegalStateException("arquivos do ouvido incompletos")
             val voz = File(ctx.filesDir, "voz")
             System.load(File(voz, "libonnxruntime.so").absolutePath)
             System.load(File(voz, "libsherpa-onnx-jni.so").absolutePath)
             val d = dir(ctx)
+            Arquivo.gravarSeguro(marcador(ctx), SystemClock.elapsedRealtime().toString())
             vad = Vad(null, VadModelConfig(
                 sileroVadModelConfig = SileroVadModelConfig(
                     model = File(d, "ouvido-vad.onnx").absolutePath,
@@ -158,66 +253,28 @@ object Ouvido {
                 ),
                 decodingMethod = "greedy_search",
             ))
+            marcador(ctx).delete()
+            if (quebras(ctx) != 0) mudarQuebras(ctx, 0)
             estado = "pronto"
             Registro.anotar("ouvido: pronto (carregou em ${SystemClock.elapsedRealtime() - t0} ms)")
         } catch (e: Throwable) {
+            marcador(ctx).delete()
+            try { rec?.release() } catch (_: Throwable) { }
+            try { vad?.release() } catch (_: Throwable) { }
             rec = null; vad = null
             estado = "erro: ${e.javaClass.simpleName}: ${e.message}".take(200)
             Registro.anotar("ERRO ouvido ao carregar: ${e.javaClass.simpleName}: ${e.message}")
-            // Arquivo estragado (a central perde energia de repente): apaga para baixar de novo.
-            if (e !is UnsatisfiedLinkError && e !is OutOfMemoryError) {
-                dir(ctx).listFiles()?.forEach { it.delete() }
-                h?.postDelayed({ baixarECarregar(ctx) }, 30_000)
-            }
-        }
-    }
-
-    /** Baixa continuando de onde parou (a internet do celular por Bluetooth pode cair no meio). */
-    private fun baixar(url: String, destino: File, progresso: (Int) -> Unit) {
-        val tmp = File(destino.parentFile, destino.name + ".parte")
-        var u = url
-        var tentativas = 0
-        while (true) {
-            val ja = if (tmp.exists()) tmp.length() else 0L
-            val c = URL(u).openConnection() as HttpURLConnection
-            c.instanceFollowRedirects = false
-            c.connectTimeout = 20_000
-            c.readTimeout = 60_000
-            c.setRequestProperty("User-Agent", "painel-asx")
-            if (ja > 0) c.setRequestProperty("Range", "bytes=$ja-")
-            val code = c.responseCode
-            if (code in 300..399) {
-                u = c.getHeaderField("Location"); c.disconnect()
-                if (++tentativas > 6) throw Exception("redirecionamentos demais")
-                continue
-            }
-            if (code == 416) { c.disconnect(); break } // já estava completo
-            if (code != 200 && code != 206) { c.disconnect(); throw Exception("download deu $code") }
-            val continuar = code == 206
-            val resto = c.contentLengthLong
-            val total = if (resto > 0) (if (continuar) ja + resto else resto) else -1L
-            RandomAccessFile(tmp, "rw").use { raf ->
-                if (continuar) raf.seek(ja) else raf.setLength(0)
-                var feito = if (continuar) ja else 0L
-                var ultimo = -1
-                val buf = ByteArray(64 * 1024)
-                c.inputStream.use { i ->
-                    while (true) {
-                        val n = i.read(buf); if (n < 0) break
-                        raf.write(buf, 0, n); feito += n
-                        if (total > 0) {
-                            val pct = (feito * 100 / total).toInt()
-                            if (pct != ultimo) { ultimo = pct; progresso(pct) }
-                        }
-                    }
+            // Arquivo faltando/cortado: baixa de novo só o que estragou (no máximo 2 vezes por versão,
+            // para não gastar a internet do celular num laço).
+            if (!baixado(ctx)) {
+                val p = prefs(ctx)
+                val n = if (p.getInt("ouvido_rebaixou_versao", 0) == BuildConfig.VERSION_CODE) p.getInt("ouvido_rebaixou", 0) else 0
+                if (n < 2) {
+                    p.edit().putInt("ouvido_rebaixou", n + 1).putInt("ouvido_rebaixou_versao", BuildConfig.VERSION_CODE).commit()
+                    h?.postDelayed({ baixarECarregar(ctx) }, 30_000)
                 }
-                raf.fd.sync()
-                if (total > 0 && feito < total) throw Exception("download incompleto ($feito de $total)")
             }
-            c.disconnect()
-            break
         }
-        if (!tmp.renameTo(destino)) throw Exception("não consegui guardar ${destino.name}")
     }
 
     // ------------------------------------------------------------------ ouvir
@@ -243,10 +300,10 @@ object Ouvido {
                 }
                 val r = rec; val v = vad
                 if (r == null || v == null) {
-                    problema = "Meu ouvido não carregou, senhor."
+                    problema = if (estado.startsWith("erro")) explicacao() else "Meu ouvido não carregou, senhor."
                 } else {
                     val audio = gravar(app, v) { Rede.naTela { etapa(it) } }
-                    if (audio == null) problema = "Não ouvi nada, senhor."
+                    if (audio == null) problema = if (pareciaMudo) "Não ouvi nada, senhor. O microfone parece mudo ou ocupado por outro app." else "Não ouvi nada, senhor."
                     else {
                         Rede.naTela { etapa("PENSANDO") }
                         val t0 = SystemClock.elapsedRealtime()
@@ -256,7 +313,14 @@ object Ouvido {
                             r.decode(st)
                             texto = limpar(r.getResult(st).text)
                         } finally { st.release() }
-                        Registro.anotar("ouvido: \"${texto ?: ""}\" (${audio.size / 16} ms de fala, entendeu em ${SystemClock.elapsedRealtime() - t0} ms)")
+                        val ms = SystemClock.elapsedRealtime() - t0
+                        val bruto = texto
+                        // Corrige os erros comuns do Whisper ("oto para" -> "rota para", "cachambu" -> Caxambu, "limite cem" -> "limite 100").
+                        if (bruto != null) texto = try {
+                            Corretor.corrigir(bruto, Lugares.todos(app).keys().asSequence().toList())
+                        } catch (e: Throwable) { bruto }
+                        Registro.anotar("ouvido: \"${bruto ?: ""}\"" + (if (texto != bruto) " → \"$texto\"" else "") +
+                            " (${audio.size / 16} ms de áudio, entendeu em $ms ms)")
                         if (texto == null) problema = "Não entendi, senhor. Pode repetir?"
                     }
                 }
@@ -273,8 +337,11 @@ object Ouvido {
         }
     }
 
+    @Volatile private var pareciaMudo = false
+
     /** Devolve o áudio (16 kHz) da frase, ou null se ele não falou nada. Roda na linha "ouvido". */
     private fun gravar(ctx: Context, v: Vad, etapa: (String) -> Unit): FloatArray? {
+        pareciaMudo = false
         val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val foco = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
             .setAudioAttributes(AudioAttributes.Builder()
@@ -297,6 +364,8 @@ object Ouvido {
             val todo = ArrayList<FloatArray>()
             var comecou = false
             var maior = 0f
+            var amostras = 0          // quantas amostras já gravou
+            var inicioFala = -1       // amostra em que a VAD percebeu a fala
             try {
                 ar.startRecording()
                 if (ar.recordingState != AudioRecord.RECORDSTATE_RECORDING) throw Exception("microfone ocupado")
@@ -305,17 +374,28 @@ object Ouvido {
                 val inicio = SystemClock.elapsedRealtime()
                 var ultimaFala = inicio
                 val pedaco = ShortArray(512)
+                // A VAD (Silero) trabalha com janelas de exatamente 512 amostras: junta as leituras até completar.
+                val janela = FloatArray(512)
+                var naJanela = 0
                 while (true) {
                     val n = ar.read(pedaco, 0, pedaco.size)
                     if (n < 0) throw Exception("microfone falhou ($n)")
-                    if (n == 0) continue
-                    val f = FloatArray(n) { pedaco[it] / 32768f }
-                    for (x in f) { val a = if (x < 0) -x else x; if (a > maior) maior = a }
-                    todo.add(f)
-                    if (n == 512) v.acceptWaveform(f)
+                    if (n > 0) {
+                        val f = FloatArray(n) { pedaco[it] / 32768f }
+                        for (x in f) { val a = if (x < 0) -x else x; if (a > maior) maior = a }
+                        todo.add(f)
+                        amostras += n
+                        var k = 0
+                        while (k < n) {
+                            val m = minOf(n - k, 512 - naJanela)
+                            System.arraycopy(f, k, janela, naJanela, m)
+                            naJanela += m; k += m
+                            if (naJanela == 512) { v.acceptWaveform(janela.copyOf()); naJanela = 0 }
+                        }
+                    } else Thread.sleep(5)   // leitura vazia: não fica rodando sem parar
                     val agora = SystemClock.elapsedRealtime()
                     if (v.isSpeechDetected()) {
-                        if (!comecou) { comecou = true; etapa("OUVINDO ●") }
+                        if (!comecou) { comecou = true; inicioFala = amostras; etapa("OUVINDO ●") }
                         ultimaFala = agora
                     }
                     if (comecou && agora - ultimaFala > 900) break      // parou de falar
@@ -327,13 +407,18 @@ object Ouvido {
                 ar.release()
                 v.clear()
             }
-            if (maior < 0.002f) Registro.anotar("ouvido: o microfone parece mudo (nível ${"%.4f".format(maior)})")
+            pareciaMudo = maior < 0.002f
+            if (pareciaMudo) Registro.anotar("ouvido: o microfone parece mudo (nível ${"%.4f".format(maior)})")
             if (!comecou) return null
             val total = todo.sumOf { it.size }
-            val saida = FloatArray(total)
+            val tudo = FloatArray(total)
             var p = 0
-            for (f in todo) { System.arraycopy(f, 0, saida, p, f.size); p += f.size }
-            return saida
+            for (f in todo) { System.arraycopy(f, 0, tudo, p, f.size); p += f.size }
+            // Corta o silêncio do começo (do bipe até ele começar a falar), deixando 0,9 s antes da fala:
+            // o Whisper processa cada segundo de áudio, e na central isso custa ~0,2 s por segundo de silêncio.
+            // (Testado: o acerto fica igual.)
+            val inicio = (inicioFala - 14_400).coerceIn(0, total)
+            return if (inicio > 0) tudo.copyOfRange(inicio, total) else tudo
         } finally {
             try { am.abandonAudioFocusRequest(foco) } catch (_: Exception) { }
         }

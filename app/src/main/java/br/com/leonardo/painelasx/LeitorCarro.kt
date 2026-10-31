@@ -49,6 +49,8 @@ object LeitorCarro {
 
     // ------------------------------------------------------------------ inicio
 
+    /** Pode ser chamado fora da linha principal (lê o arquivo de viagens). O GPS só liga depois de ler as viagens. */
+    @Synchronized
     fun iniciar(ctx: Context) {
         if (iniciado) return
         iniciado = true
@@ -56,7 +58,7 @@ object LeitorCarro {
         appCtx = app
         ignorarReAte = System.currentTimeMillis() + 60_000
         Carro.iniciar(app)
-        Viagens.iniciar(app)
+        medirInicio("viagens") { Viagens.iniciar(app) }
         Thread({
             try {
                 val acoes = acoesDaFabrica(app)

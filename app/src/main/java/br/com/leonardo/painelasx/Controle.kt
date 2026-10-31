@@ -54,6 +54,8 @@ class Controle : AccessibilityService() {
         }
     }
 
+    private var ultimasTentativas = 0L
+
     @Volatile
     var telaAtual = ""
         private set
@@ -122,6 +124,11 @@ class Controle : AccessibilityService() {
         val pacote = e.packageName?.toString() ?: return
 
         if (confirmarInstalacao && pacote in INSTALADORES) {
+            // A janela do instalador manda dezenas de eventos: agenda as tentativas uma vez só a cada 6 s
+            // (antes cada evento agendava mais 6, e elas se acumulavam).
+            val agora = android.os.SystemClock.elapsedRealtime()
+            if (agora - ultimasTentativas < 6500) return
+            ultimasTentativas = agora
             // A janela do Android pode demorar a mostrar o botao: tenta algumas vezes.
             val h = android.os.Handler(android.os.Looper.getMainLooper())
             for (atraso in listOf(0L, 400L, 1000L, 2000L, 3500L, 6000L)) {

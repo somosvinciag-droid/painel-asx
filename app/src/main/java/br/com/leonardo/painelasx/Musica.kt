@@ -112,9 +112,15 @@ object Musica {
             mp.setOnPreparedListener { it.start() }
             mp.setOnErrorListener { _, w, x ->
                 Registro.anotar("rádio: erro $w/$x em $titulo")
-                Voz.falar("A rádio $titulo não abriu agora.")
-                pararRadio()
+                if (radio === mp) {
+                    Voz.falar("A rádio $titulo não abriu agora.")
+                    pararRadio()
+                }
                 true
+            }
+            // A transmissão acabou/caiu sem erro: a tela não fica mostrando "Rádio online" em silêncio.
+            mp.setOnCompletionListener {
+                if (radio === mp) { Registro.anotar("rádio: parou ($titulo)"); pararRadio() }
             }
             mp.prepareAsync()
             radio = mp

@@ -200,30 +200,56 @@ object Diario {
  */
 object Fila {
     private const val PREFS = "notas_fila"
+    private val trava = Any()
+    private val enviando = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    @Synchronized
+    /**
+     * Guarda e manda em segundo plano. Chamado na linha principal: só mexe na lista (rápido).
+     * Antes, a lista e o envio usavam a mesma trava: com a internet fraca, ditar uma nota enquanto a fila
+     * estava sendo enviada travava a tela (o envio pode levar minutos).
+     */
     fun enviar(ctx: Context, caminho: String, corpo: JSONObject) {
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val a = try { JSONArray(p.getString("fila", "[]")) } catch (_: Exception) { JSONArray() }
-        a.put(JSONObject().put("caminho", caminho).put("corpo", corpo))
-        p.edit().putString("fila", a.toString()).apply()
+        synchronized(trava) {
+            val a = try { JSONArray(p.getString("fila", "[]")) } catch (_: Exception) { JSONArray() }
+            val id = System.currentTimeMillis().toString(36) + "-" + (Math.random() * 1e9).toLong().toString(36)
+            a.put(JSONObject().put("id", id).put("caminho", caminho).put("corpo", corpo))
+            p.edit().putString("fila", a.toString()).apply()
+        }
         val app = ctx.applicationContext
         Rede.emSegundoPlano("fila") { esvaziar(app) }
     }
 
-    @Synchronized
+    /** Manda o que está na fila (um envio de cada vez; se já estiver enviando, não faz nada). */
     fun esvaziar(ctx: Context) {
-        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val a = try { JSONArray(p.getString("fila", "[]")) } catch (_: Exception) { JSONArray() }
-        if (a.length() == 0) return
-        val sobra = JSONArray()
-        for (i in 0 until a.length()) {
-            val o = a.getJSONObject(i)
-            val ok = try {
-                Conector.enviar(o.getString("caminho"), o.getJSONObject("corpo")).first == 200
-            } catch (_: Exception) { false }
-            if (!ok) sobra.put(o)
+        if (!enviando.compareAndSet(false, true)) return
+        try {
+            val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val a = synchronized(trava) { try { JSONArray(p.getString("fila", "[]")) } catch (_: Exception) { JSONArray() } }
+            if (a.length() == 0) return
+            val enviados = HashSet<String>()
+            for (i in 0 until a.length()) {
+                val o = a.optJSONObject(i) ?: continue
+                val ok = try {
+                    Conector.enviar(o.getString("caminho"), o.getJSONObject("corpo")).first == 200
+                } catch (_: Exception) { false }
+                if (!ok) break            // sem internet: tenta o resto depois (não espera um tempo esgotado por item)
+                enviados.add(o.optString("id", "#$i"))
+            }
+            if (enviados.isEmpty()) return
+            // Tira só o que foi enviado (pode ter chegado coisa nova enquanto enviava).
+            synchronized(trava) {
+                val agora = try { JSONArray(p.getString("fila", "[]")) } catch (_: Exception) { JSONArray() }
+                val sobra = JSONArray()
+                for (i in 0 until agora.length()) {
+                    val o = agora.optJSONObject(i) ?: continue
+                    val id = o.optString("id", "#$i")
+                    if (id !in enviados) sobra.put(o)
+                }
+                p.edit().putString("fila", sobra.toString()).apply()
+            }
+        } finally {
+            enviando.set(false)
         }
-        p.edit().putString("fila", sobra.toString()).apply()
     }
 }

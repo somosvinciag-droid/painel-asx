@@ -38,7 +38,8 @@ object Relogio {
             passo("memória") { memoria(ctx) }
             passo("clima") { Clima.atualizarSePreciso(ctx) }
             passo("noite") { modoNoite(ctx) }
-            passo("fila") { if (Conector.online) Fila.esvaziar(ctx) }
+            // Fora da linha do relógio: com a internet fraca o envio pode demorar minutos.
+            passo("fila") { if (Conector.online) Rede.emSegundoPlano("fila") { Fila.esvaziar(ctx) } }
             passo("backup") {
                 val agora = System.currentTimeMillis()
                 if (Conector.online && (if (ultimoBackup == 0L) minuto >= 10 else agora - ultimoBackup > 6 * 3600_000L)) {

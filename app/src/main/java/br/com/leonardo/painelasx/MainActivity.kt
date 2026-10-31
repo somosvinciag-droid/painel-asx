@@ -291,7 +291,7 @@ class MainActivity : Activity() {
             Jarvis.mudarMusicaDeEntrada(this, it)
         })
         jv.addView(botao("▶  Testar as boas-vindas", BOTAO, OURO, 16f).apply {
-            setOnClickListener { Jarvis.partida(applicationContext) }
+            setOnClickListener { Jarvis.partida(applicationContext, forcar = true) }
         }, alto())
         jv.addView(rotulo("Avisos no celular (estacionamento, lembretes): instale o app \"ntfy\" no celular e assine este canal:"))
         jv.addView(botao("📋  Copiar o canal: " + Config.topicoNtfy(this), BOTAO, TEXTO, 14f).apply {
@@ -499,6 +499,15 @@ class MainActivity : Activity() {
             falta = true
             permissoes.addView(botao("Câmera (foto para o Claude, experimental)", BOTAO, TEXTO, 15f).apply {
                 setOnClickListener { requestPermissions(arrayOf(Manifest.permission.CAMERA), 9) }
+            }, alto())
+        }
+        if (!Partida.temAcesso(this)) {
+            falta = true
+            permissoes.addView(botao("Ver o que abre junto na partida (acesso ao uso)", BOTAO, TEXTO, 15f).apply {
+                setOnClickListener {
+                    try { startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) } catch (_: Exception) { }
+                    mostrar("Ligue o \"Painel ASX\" na lista e volte.", falar = false)
+                }
             }, alto())
         }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {

@@ -64,6 +64,16 @@ object Conector {
     }
 
     private fun laco(ctx: Context) {
+        try {
+            lacoSemFim(ctx)
+        } catch (t: Throwable) {
+            Registro.anotar("ERRO conector parou: ${t.javaClass.simpleName}: ${t.message}")
+        } finally {
+            rodando.set(false)   // deixa o próximo Conector.iniciar (serviço fixo, Controle) ligar de novo
+        }
+    }
+
+    private fun lacoSemFim(ctx: Context) {
         Registro.anotar("conector: ligando")
         var espera = 3000L
         var ultimoRelatorio = 0L
@@ -90,7 +100,8 @@ object Conector {
                 if (linhas.isNotEmpty() || agora - ultimoRelatorio > 60_000 || !mandouDiagnostico) {
                     val corpo = JSONObject().put("estado", estado(ctx)).put("linhas", JSONArray(linhas))
                     if (!mandouDiagnostico) corpo.put("diagnostico", Diagnostico.texto(ctx))
-                    val r = pedir("POST", "/app/relatorio", corpo)
+                    // Sem internet no meio do envio: devolve as linhas (antes os erros dessa hora se perdiam).
+                    val r = try { pedir("POST", "/app/relatorio", corpo) } catch (e: Exception) { Registro.devolverParaEnviar(linhas); throw e }
                     if (r.first == 403) {
                         prefs(ctx).edit().putBoolean("registrado", false).apply()
                         Registro.devolverParaEnviar(linhas)
@@ -115,6 +126,7 @@ object Conector {
                 val cmds = JSONObject(r.second).optJSONArray("comandos") ?: JSONArray()
                 for (i in 0 until cmds.length()) executar(ctx, cmds.getJSONObject(i))
             } catch (e: Exception) {
+                // (Throwable fora daqui, como falta de memória, sai do laço e o conector religa no próximo iniciar.)
                 if (online) Registro.anotar("conector: sem conexão (${e.javaClass.simpleName})")
                 online = false
                 ultimoErro = e.message ?: e.javaClass.simpleName

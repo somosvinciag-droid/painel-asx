@@ -30,16 +30,33 @@ object Viagens {
     private var paradoDesde = 0L
     private var ultimoSalvo = 0L
 
-    @Synchronized
+    @Volatile private var lendo = false
+
+    /**
+     * Lê o histórico (pode ser grande): roda fora da linha principal e lê o arquivo SEM segurar a trava,
+     * para a tela do carro (resumo do dia) não travar enquanto isso.
+     */
     fun iniciar(ctx: Context) {
-        if (arquivo != null) return
-        arquivo = File(ctx.filesDir, "viagens.json")
-        ultimoLocal = File(ctx.filesDir, "onde_parou.json")
+        synchronized(this) {
+            if (arquivo != null || lendo) return
+            lendo = true
+        }
+        val f = File(ctx.filesDir, "viagens.json")
+        val lidas = ArrayList<JSONObject>()
         try {
-            val a = JSONArray(arquivo!!.takeIf { it.exists() }?.readText() ?: "[]")
-            for (i in 0 until a.length()) viagens.add(a.getJSONObject(i))
+            val a = JSONArray(f.takeIf { it.exists() }?.readText() ?: "[]")
+            for (i in 0 until a.length()) lidas.add(a.getJSONObject(i))
         } catch (_: Exception) {
         }
+        terminarDeIniciar(ctx, f, lidas)
+    }
+
+    @Synchronized
+    private fun terminarDeIniciar(ctx: Context, f: File, lidas: List<JSONObject>) {
+        arquivo = f
+        ultimoLocal = File(ctx.filesDir, "onde_parou.json")
+        viagens.addAll(0, lidas)
+        lendo = false
         // Viagem que ficou aberta (a central desligou no meio): fecha com o último ponto salvo.
         val aberta = viagens.lastOrNull()
         if (aberta != null && !aberta.has("fim")) {
@@ -53,11 +70,25 @@ object Viagens {
         }
     }
 
-    private fun salvar() {
-        try {
-            arquivo?.writeText(JSONArray(viagens.takeLast(MAX_VIAGENS)).toString())
-        } catch (_: Exception) {
+    /** Grava fora da linha principal (o GPS chega na linha principal) e sem cortar o arquivo se a energia cair. */
+    private val gravador = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "viagens").apply { isDaemon = true } }
+
+    private var ultimaVersao = 0L          // só muda dentro dos métodos @Synchronized
+    @Volatile private var versaoGravada = 0L
+
+    /** [agora] = grava já, nesta linha (fim de viagem: a central pode fechar o app logo depois de dormir). */
+    private fun salvar(agora: Boolean = false) {
+        val f = arquivo ?: return
+        val texto = try { JSONArray(viagens.takeLast(MAX_VIAGENS)).toString() } catch (_: Exception) { return }
+        val numero = ++ultimaVersao
+        val gravar = Runnable {
+            synchronized(f) {
+                if (numero <= versaoGravada) return@synchronized   // já gravou uma mais nova: não volta atrás
+                try { Arquivo.gravarSeguro(f, texto); versaoGravada = numero }
+                catch (e: Exception) { Registro.anotar("ERRO viagens: não gravei (${e.javaClass.simpleName})") }
+            }
         }
+        if (agora) gravar.run() else gravador.execute(gravar)
     }
 
     private fun calcularResumo(v: JSONObject) {
@@ -83,7 +114,8 @@ object Viagens {
         if (agora - ultimoSalvo > 30_000) {
             ultimoSalvo = agora
             try {
-                ultimoLocal?.writeText(ponto(l).put("hora", agora).toString())
+                val f = ultimoLocal; val texto = ponto(l).put("hora", agora).toString()
+                if (f != null) gravador.execute { try { Arquivo.gravarSeguro(f, texto) } catch (_: Exception) { } }
             } catch (_: Exception) {
             }
         }
@@ -147,7 +179,7 @@ object Viagens {
             Registro.anotar("viagem: terminou — ${"%.1f".format(v.optDouble("km"))} km em ${v.optLong("duracao_min")} min")
             try { Carro.fimDeViagem(v, motivo) } catch (_: Exception) { }
         }
-        salvar()
+        salvar(agora = true)
     }
 
     /** A central vai desligar (tela apagou / desligando): fecha a viagem. */

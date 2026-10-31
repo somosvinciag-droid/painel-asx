@@ -23,7 +23,13 @@ object Despertador {
     const val ACAO = "br.com.leonardo.painelasx.ACORDAR"
     private const val JOB = 4812
 
+    /** Estado da central ("3" = dormindo). Lê direto (rápido); se o Android não deixar, pergunta ao getprop. */
     fun estadoMcu(): String = try {
+        val c = Class.forName("android.os.SystemProperties")
+        (c.getMethod("get", String::class.java).invoke(null, "sys.nwd.mcu.state") as? String)?.trim() ?: estadoMcuGetprop()
+    } catch (_: Throwable) { estadoMcuGetprop() }
+
+    private fun estadoMcuGetprop(): String = try {
         val p = ProcessBuilder("getprop", "sys.nwd.mcu.state").redirectErrorStream(true).start()
         val t = p.inputStream.bufferedReader().readText().trim()
         p.waitFor()
@@ -63,6 +69,10 @@ object Despertador {
             Registro.anotar("despertador: chamado por $quem (estado da central: ${estado.ifBlank { "?" }})")
             if (estado == "3") {
                 marcar(app)   // ainda dormindo: tenta de novo depois
+            } else if (!Jarvis.devoSaudar(app)) {
+                // O alarme e a "internet voltou" chegam às vezes mais de 1 min depois de a central acordar,
+                // quando o anjo da guarda/tela do carro já saudou: sem isto o Jarvis saudava 2 vezes (registro 31/10 09:32 e 09:33).
+                Registro.anotar("despertador: o Jarvis já saudou desde que a central acordou")
             } else {
                 Rede.naTela {
                     Voz.iniciar(app)

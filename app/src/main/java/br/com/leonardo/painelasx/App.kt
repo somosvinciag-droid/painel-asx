@@ -28,5 +28,24 @@ class App : Application() {
             }
             anterior?.uncaughtException(th, erro)
         }
+        // A saudação é a PRIMEIRA coisa (antes de serviço, tela, voz do Android, GPS...): ela toca o áudio
+        // já gravado numa linha própria e não depende de nada disso.
+        try { Jarvis.talvezPartidaNoInicio(this) } catch (e: Throwable) { Registro.anotar("ERRO partida no início: ${e.message}") }
+        // Mede quanto tempo a linha principal fica ocupada com a inicialização (para conferir na central).
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            Registro.anotar("inicio: linha principal livre ${android.os.SystemClock.elapsedRealtime() - inicio} ms")
+        }
+    }
+}
+
+/** Roda [bloco] e anota quanto tempo levou ("inicio: <etapa> X ms"). Um erro fica anotado e não derruba o resto. */
+fun medirInicio(etapa: String, bloco: () -> Unit) {
+    val t = android.os.SystemClock.elapsedRealtime()
+    try {
+        bloco()
+    } catch (e: Throwable) {
+        Registro.anotar("ERRO inicio: $etapa: ${e.javaClass.simpleName}: ${e.message}")
+    } finally {
+        Registro.anotar("inicio: $etapa ${android.os.SystemClock.elapsedRealtime() - t} ms")
     }
 }
