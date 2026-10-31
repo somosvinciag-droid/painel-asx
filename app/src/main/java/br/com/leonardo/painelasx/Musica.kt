@@ -197,11 +197,26 @@ object Musica {
         }
     }
 
+    /**
+     * O que mostrar na tela do carro. Spotify tocando na PRÓPRIA central (Spotify Connect): vem dela (a capa e os
+     * botões não dependem da internet do celular). Senão, a música do celular (cabo/rede), com a capa.
+     */
     fun tocando(ctx: Context): Tocando? {
         radioTocando?.let { return Tocando(it, "Rádio online", null, 0, 0, true, "RÁDIO") }
-        // Celular ligado (app Painel ASX Celular): a música dele vem primeiro, com a capa.
-        Celular.tocando()?.let { return it }
-        if (!podeVerMusica(ctx)) return null
+        val cel = Celular.tocando()
+        val local = if (podeVerMusica(ctx)) tocandoNaCentral(ctx) else null
+        if (local != null && local.tocando) {
+            return if (local.capa == null && cel != null && cel.capa != null && cel.titulo == local.titulo) local.copy(capa = cel.capa) else local
+        }
+        return cel ?: local
+    }
+
+    /** A central está tocando música ela mesma (os botões da tela vão direto para ela, sem passar pelo celular). */
+    fun centralTocando(ctx: Context): Boolean = podeVerMusica(ctx) && try {
+        sessaoAtual(ctx)?.first?.playbackState?.state == PlaybackState.STATE_PLAYING
+    } catch (_: Exception) { false }
+
+    private fun tocandoNaCentral(ctx: Context): Tocando? {
         return try {
             val (s, m) = sessaoAtual(ctx) ?: return null
             if (m == null) return null
@@ -228,7 +243,7 @@ object Musica {
     /** "Música — Artista" do app que está tocando agora, ou null. */
     fun tocandoAgora(ctx: Context): String? {
         radioTocando?.let { return "📻 $it" }
-        Celular.tituloAgora()?.let { return it }
+        if (!centralTocando(ctx)) Celular.tituloAgora()?.let { return it }
         if (!podeVerMusica(ctx)) return null
         return try {
             val m = sessaoAtual(ctx)?.second ?: return null

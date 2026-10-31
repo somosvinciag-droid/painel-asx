@@ -354,15 +354,17 @@ class TelaCarro : Activity() {
             ctrl.addView(f, lp(0, px(80), 1f).apply { if (ctrl.childCount > 0) leftMargin = px(8) })
             return ic
         }
-        // Com o celular ligado, o controle vai direto para ele; senão, a tecla de mídia de sempre.
+        // Música tocando na própria central (Spotify Connect): a tecla de mídia vai direto para ela (na hora).
+        // Senão, com o celular ligado, o controle vai para ele; sem celular, a tecla de mídia de sempre.
         botao(Icone.ANTERIOR, false) {
-            if (!Celular.controle("anterior")) Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+            if (Musica.centralTocando(this) || !Celular.controle("anterior")) Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_PREVIOUS)
         }
         playIcone = botao(Icone.PAUSA, true) {
-            if (!Musica.pararRadio() && !Celular.controle("alternar")) Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+            if (!Musica.pararRadio() && (Musica.centralTocando(this) || !Celular.controle("alternar")))
+                Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
         }
         botao(Icone.PROXIMA, false) {
-            if (!Celular.controle("proxima")) Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_NEXT)
+            if (Musica.centralTocando(this) || !Celular.controle("proxima")) Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_NEXT)
         }
         dir.addView(ctrl, lp(MATCH, px(80)).apply { topMargin = px(14) })
 
