@@ -163,3 +163,52 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
 - O Leonardo achou a voz baixa "mesmo aumentando o som". A voz própria agora toca pelo canal da MÚSICA (USAGE_MEDIA,
   segue o botão de volume; antes era navegação) e é reforçada (`VozPropria.reforcar`: ganho `voz_volume`, padrão 1,6,
   até 3, nunca passa de 95% do pico). Comandos: "voz mais alta" / "voz mais baixa" (±0,4).
+
+## Celular (fase 1)
+
+- Segundo app no mesmo repositório: módulo `:celular`, "Painel ASX Celular" (`br.com.leonardo.painelasx.celular`),
+  Kotlin sem AndroidX, telas em código, minSdk 30, targetSdk/compileSdk 35 (o `:app` continua 34; AGP 8.5.2 com
+  `android.suppressUnsupportedCompileSdk=35`). Assinado com a MESMA chave da central (`CHAVE_ARQUIVO`, pkcs12, alias `painel`).
+- Publicação: `.github/workflows/celular.yml` (push no main em `celular/**` ou manual) monta e publica
+  `painel-asx-celular.apk` na release FIXA `celular` (apaga e cria de novo, sempre `--prerelease --latest=false`).
+  NUNCA marcar como latest: o Atualizador da central lê `releases/latest`. `montar.yml` ignora `celular/**` (mudança só no
+  celular não gera versão da central, que derruba o Controle) e monta só o `:app`. `conferir.yml` compila os dois e,
+  se falhar, põe os erros numa anotação (os logs do Actions não abrem no ambiente do Claude; ler com
+  `gh api repos/.../check-runs/<job>/annotations`).
+- Desenho (fase 1 = rede): o celular compartilha a internet por Bluetooth (ancoragem) e a central é cliente. O `Ponte`
+  (serviço `connectedDevice|microphone`) abre um servidor TCP na porta 48110 SÓ na interface `bt-pan` e só aceita
+  clientes da mesma sub-rede. A central (`CaboCelular`) acha o celular pelo gateway da rede Bluetooth e conecta.
+  Não briga com o ZLink: o cabo continua com o Android Auto e carregando.
+- Fase 2 (cabo AOA) já no código, DESLIGADA: interruptor "Cabo USB do celular para o Painel ASX" na MainActivity
+  (padrão = Android Auto). Desligado, a central não mexe no cabo (o `activity-alias` `.CaboPeloPainel` com o filtro USB
+  fica desabilitado). Ligado: liga o alias, pede a permissão do Android (o Leonardo toca em Permitir) e manda os textos
+  AOA `Leonardo`/`PainelASX` (os mesmos do `accessory_filter.xml` do celular). Mesmo protocolo nos dois caminhos
+  (interface `Canal`: `CanalRede`, `CanalAoa`/`CanalAcessorio`).
+- Diagnóstico "--- cabo USB ---" (só leitura): `config_disableUsbPermissionDialogs`, uid/flags/assinatura do ZLink,
+  quem tem filtro USB (telas e receptores, prioridade e XML) e os últimos aparelhos plugados com as interfaces.
+  Serve para decidir caso A (o ZLink depende de ser o único "padrão") ou caso B (permissão automática).
+- Protocolo: 4 bytes big-endian de tamanho + JSON UTF-8, máx. 256 KB (`Quadro.kt`, igual nos dois apps).
+  Uma linha lê, outra escreve; a central manda `ping` a cada 5 s e derruba depois de 15 s sem nada (o celular, 20 s).
+  Central → celular: `ola` (id, mensagens), `ajustes`, `controle` (anterior/alternar/proxima/play/pausa/ir), `ouvir`, `parar`, `ping`.
+  Celular → central: `pareando`, `recusado`, `ola` (modelo, android, app, mic), `musica`, `capa` (JPEG 320 px base64, só
+  quando muda), `bateria`, `aviso`, `ouvindo`, `ouvi` (texto ou erro), `ligacao`, `sinal`, `pong`.
+- Pareamento (repo público, nada de senha no código): a central gera um id aleatório (prefs `celular`, FORA do backup).
+  Central nova → o celular responde `pareando` e mostra "Permitir o Painel ASX do carro?" (código = 4 primeiros
+  caracteres do id; a central mostra o mesmo código no cartão "Celular"). Permitida: aceita direto; recusada: `recusado`
+  (a central espera 10 min). Nada é atendido antes do "Permitir". "Esquecer o carro" na tela do celular.
+- Na central: `Musica.tocando`/`tocandoAgora` preferem o celular; os botões da TelaCarro mandam `controle` (sem música no
+  celular, a tecla de mídia de sempre); FALAR manda `ouvir` → o texto passa pelo `Corretor` e vai para `Comandos`;
+  erro ou 8 s sem o celular começar a ouvir (ou 20 s no total) → ouvido próprio. Bateria "CEL 87%" no topo da TelaCarro.
+  Conector: `celular: {ligado, transporte, modelo, bateria, musica_titulo}`.
+- PRIVACIDADE: o texto das mensagens NUNCA vai para o Registro, conector, backup, diagnóstico nem Jarvis/Claude. Só é
+  falado (`Voz.falarPrivado`, não aparece na tela do carro, que o Controle/Claude conseguem ler), só com "Ler mensagens"
+  ligado (padrão desligado; o celular só manda avisos se a central pedir) e nunca durante ligação (até 3 ficam na memória
+  e são faladas quando a ligação acaba). Não criar comando de voz que devolva texto de mensagem (o `comando_central`
+  devolve a resposta ao Claude). O app do celular tem INTERNET só por causa do socket local e não manda nada para fora
+  (o reconhecimento de voz é do app Google, que pode usar a internet dele).
+- Microfone no celular (Android 14+): o serviço só ganha o tipo `microphone` quando é ligado com o app na frente (abrir
+  o app ou tocar no aviso da ponte). Ligado pelo boot/acesso às notificações, fica só `connectedDevice` e o `ouvir`
+  responde erro na hora (a central usa o ouvido próprio) + aviso "Toque aqui...".
+- Passos do HyperOS (botões na tela do app do celular): avisos, microfone, acesso às notificações (se "configuração
+  restrita": página do app → ⋮ → Permitir configurações restritas), bateria sem restrição, início automático, página do
+  app ("Pausar atividade" desligado), ancoragem Bluetooth.
