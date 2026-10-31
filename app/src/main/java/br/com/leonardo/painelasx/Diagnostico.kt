@@ -45,6 +45,9 @@ object Diagnostico {
         sb.append("\n--- celular ---\n")
         sb.append(try { Celular.diagnostico(ctx) } catch (e: Exception) { "(não consegui ler: ${e.javaClass.simpleName})\n" })
 
+        sb.append("\n--- android auto ---\n")
+        sb.append(try { AndroidAuto.diagnostico() } catch (e: Exception) { "(não consegui ler: ${e.javaClass.simpleName})\n" })
+
         sb.append("\n--- cabo USB ---\n")
         sb.append(try { CaboUsb.diagnostico(ctx) } catch (e: Exception) { "(não consegui ler: ${e.javaClass.simpleName})\n" })
 

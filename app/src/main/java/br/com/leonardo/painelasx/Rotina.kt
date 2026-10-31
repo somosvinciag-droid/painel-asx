@@ -66,6 +66,8 @@ object Rotina {
     }
 
     fun teclaMidia(ctx: Context, codigo: Int) {
+        // Android Auto pelo cabo e nada tocando na própria central: a tecla vai para o celular (comandos do Jarvis).
+        if (!Musica.centralTocando(ctx) && AndroidAuto.teclaMidia(codigo)) return
         val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, codigo))
         am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, codigo))

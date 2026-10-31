@@ -176,7 +176,8 @@ object Musica {
     /** A sessão que está tocando (ou a primeira) e os dados guardados dela. */
     private fun sessaoAtual(ctx: Context): Pair<MediaController, MediaMetadata?>? {
         val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
-        val sessoes = msm.getActiveSessions(ComponentName(ctx, Ouvinte::class.java))
+        // Sem a nossa própria sessão (a do Android Auto pelo cabo): ela aparece direto por AndroidAuto.tocando().
+        val sessoes = msm.getActiveSessions(ComponentName(ctx, Ouvinte::class.java)).filter { it.packageName != ctx.packageName }
         val s = sessoes.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: sessoes.firstOrNull()
         synchronized(travaSessao) {
             if (s == null) { soltarSessao(); return null }
@@ -199,11 +200,12 @@ object Musica {
 
     /**
      * O que mostrar na tela do carro. Spotify tocando na PRÓPRIA central (Spotify Connect): vem dela (a capa e os
-     * botões não dependem da internet do celular). Senão, a música do celular (cabo/rede), com a capa.
+     * botões não dependem da internet do celular). Senão, o Android Auto pelo cabo; senão o app do celular, com a capa.
      */
     fun tocando(ctx: Context): Tocando? {
         radioTocando?.let { return Tocando(it, "Rádio online", null, 0, 0, true, "RÁDIO") }
-        val cel = Celular.tocando()
+        val aa = AndroidAuto.tocando()
+        val cel = aa ?: Celular.tocando()
         val local = if (podeVerMusica(ctx)) tocandoNaCentral(ctx) else null
         if (local != null && local.tocando) {
             return if (local.capa == null && cel != null && cel.capa != null && cel.titulo == local.titulo) local.copy(capa = cel.capa) else local
@@ -243,7 +245,7 @@ object Musica {
     /** "Música — Artista" do app que está tocando agora, ou null. */
     fun tocandoAgora(ctx: Context): String? {
         radioTocando?.let { return "📻 $it" }
-        if (!centralTocando(ctx)) Celular.tituloAgora()?.let { return it }
+        if (!centralTocando(ctx)) (AndroidAuto.tituloAgora() ?: Celular.tituloAgora())?.let { return it }
         if (!podeVerMusica(ctx)) return null
         return try {
             val m = sessaoAtual(ctx)?.second ?: return null
