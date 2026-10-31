@@ -17,8 +17,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
-      - name: Compilar
-        run: gradle --no-daemon compileReleaseKotlin
+      - name: Compilar (central e celular)
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! gradle --no-daemon --continue :app:compileReleaseKotlin :celular:compileReleaseKotlin 2>&1 | tee compilar.log; then
+            # Os erros viram uma anotação (dá para ler pela API do GitHub, sem baixar o log).
+            ERROS=$(grep -E '^e: |What went wrong|^> [^T]|error:|AAPT' compilar.log | head -40 | sed 's/%/%25/g' | tr '\n' '\r' | sed 's/\r/%0A/g')
+            echo "::error title=Compilação falhou::${ERROS}"
+            exit 1
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 22

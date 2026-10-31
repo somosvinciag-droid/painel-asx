@@ -73,6 +73,8 @@ class ServicoFixo : Service() {
         medirInicio("relogio") { Relogio.iniciar(this) }
         val app = applicationContext
         Thread({
+            // Celular primeiro (é leve): com o cabo já plugado quando a central acorda, ele volta em segundos.
+            medirInicio("celular") { CaboCelular.iniciar(app) }
             medirInicio("conector") { Conector.iniciar(app) }
             medirInicio("atualizador") { Atualizador.agendar(app) }
             medirInicio("lugares") { Lugares.iniciar(app) }

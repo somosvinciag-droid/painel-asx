@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Os mesmos textos que a central manda no modo acessório (CaboUsb.TEXTOS). Sem "version" (a doc desaconselha). -->
+<resources>
+    <usb-accessory manufacturer="Leonardo" model="PainelASX" />
+</resources>

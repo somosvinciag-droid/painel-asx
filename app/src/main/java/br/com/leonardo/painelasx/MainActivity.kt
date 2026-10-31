@@ -28,6 +28,8 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.Switch
 import android.widget.TextView
 
@@ -76,6 +78,7 @@ class MainActivity : Activity() {
     private lateinit var permissoes: LinearLayout
     private lateinit var textoViagens: TextView
     private lateinit var textoJarvis: TextView
+    private lateinit var textoCelular: TextView
 
     private val relogio = Handler(Looper.getMainLooper())
     private val atualizarSinais = object : Runnable {
@@ -122,7 +125,7 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(codigo: Int, perms: Array<out String>, resultados: IntArray) {
         super.onRequestPermissionsResult(codigo, perms, resultados)
         if (codigo == Ouvido.PEDIDO_MIC) {
-            if (resultados.firstOrNull() == PackageManager.PERMISSION_GRANTED) relogio.postDelayed({ ouvir() }, 400)
+            if (resultados.firstOrNull() == PackageManager.PERMISSION_GRANTED) relogio.postDelayed({ ouvirNaCentral() }, 400)
             else mostrar("Sem o microfone eu não consigo ouvir, senhor.")
             return
         }
@@ -305,6 +308,52 @@ class MainActivity : Activity() {
             getSharedPreferences("config", MODE_PRIVATE).edit().putBoolean("ntfy_ok", it).apply()
         })
 
+        // Celular (app "Painel ASX Celular")
+        val cel = cartao(direita, "Celular")
+        textoCelular = TextView(this).apply {
+            setTextColor(TEXTO); textSize = 15f
+            setLineSpacing(0f, 1.3f)
+            setPadding(0, dp(6), 0, dp(4))
+        }
+        cel.addView(textoCelular)
+        cel.addView(rotulo("Com o app \"Painel ASX Celular\" e a internet por Bluetooth do celular ligada, a tela do carro " +
+            "mostra a música do celular (com a capa), a bateria, e o FALAR usa o microfone do celular. " +
+            "Na primeira vez, toque em Permitir no celular e confira o código: ${CaboCelular.codigo(this)}."))
+        cel.addView(interruptor("Ler mensagens em voz alta (só no carro, nunca durante ligação)", Celular.lerMensagens(this)) {
+            Celular.mudarLerMensagens(this, it)
+        })
+        cel.addView(rotulo("O texto das mensagens só é falado aqui no carro: não aparece na tela, não vai para o registro, " +
+            "nem para o backup, nem para o Claude."))
+        // Cabo USB do celular: Android Auto pelo Painel (padrão), app do celular (teste) ou ZLink de fábrica.
+        cel.addView(TextView(this).apply {
+            text = "Cabo USB do celular"
+            setTextColor(TEXTO); textSize = 16f; typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, dp(14), 0, dp(2))
+        })
+        val modos = listOf(
+            CaboUsb.MODO_AA to "Android Auto pelo Painel (padrão): som, música e próxima curva no painel",
+            CaboUsb.MODO_APP to "App \"Painel ASX Celular\" pelo cabo (teste)",
+            CaboUsb.MODO_ZLINK to "ZLink de fábrica (o Painel não mexe no cabo)"
+        )
+        val grupo = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+        val modoAtual = CaboUsb.modo(this)
+        modos.forEachIndexed { i, (m, t) ->
+            grupo.addView(RadioButton(this).apply {
+                id = 7100 + i
+                text = t
+                setTextColor(TEXTO); textSize = 15f
+                setPadding(dp(4), dp(8), 0, dp(8))
+                isChecked = m == modoAtual
+            })
+        }
+        grupo.setOnCheckedChangeListener { _, id ->
+            val m = modos.getOrNull(id - 7100)?.first ?: return@setOnCheckedChangeListener
+            if (m == CaboUsb.modo(this)) return@setOnCheckedChangeListener
+            CaboUsb.mudarModo(this, m)
+            mostrar("Pronto. Tire e ponha o cabo do celular para valer.", falar = false)
+        }
+        cel.addView(grupo)
+
         // Viagens (GPS)
         val viag = cartao(direita, "Viagens")
         textoViagens = TextView(this).apply {
@@ -450,6 +499,7 @@ class MainActivity : Activity() {
                 Diario.manutencao(this).joinToString("\n") { (if (it.second) "⚠ " else "✓ ") + it.first }
         } catch (_: Exception) {
         }
+        textoCelular.text = Celular.resumo(this) + "\n" + AndroidAuto.resumo()
         botaoMusica.text = "🎵  Música: " + Apps.nomeDe(this, Rotina.musica(this))
         botaoNavegacao.text = "🧭  GPS: " + Apps.nomeDe(this, Rotina.navegacao(this))
         textoVolume.text = "Volume ao ligar: ${Rotina.volume(this)}%"
@@ -530,6 +580,19 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------- ações
 
     private fun ouvir() {
+        if (Ouvido.ouvindo || FontesDeVoz.algumaOuvindo) return
+        // O FALAR é sempre do Jarvis: fonte de fora (app do celular) ou o ouvido da central (ver FonteDeVoz).
+        val fonte = FontesDeVoz.escolher() ?: run { ouvirNaCentral(); return }
+        val pediu = fonte.ouvir({ etapa -> resposta.text = "Jarvis: ${etapa.lowercase()}…" }) { texto, _ ->
+            if (texto != null) {
+                resposta.text = "Ouvi: \"$texto\""
+                executar(texto)
+            } else ouvirNaCentral()
+        }
+        if (!pediu) ouvirNaCentral()
+    }
+
+    private fun ouvirNaCentral() {
         if (Ouvido.ouvindo) return
         if (!Ouvido.baixado(this) && Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).resolveActivity(packageManager) != null) {
             ouvirPeloAndroid(); return

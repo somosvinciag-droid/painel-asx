@@ -3,12 +3,14 @@ name: Montar e publicar o app
 # Cada envio para o main que mexa no app: monta o APK (com o endereco do conector),
 # assina sempre com a MESMA chave e publica como versao nova. A central avisa o Leonardo
 # ("Atualizacao disponivel") e instala quando ele aprova.
-# O conector (servidor/) tem workflow proprio: conector.yml.
+# O conector (servidor/) tem workflow proprio: conector.yml. O app do celular (celular/) tem o celular.yml:
+# mudanca so no celular NAO gera versao nova da central (cada versao nova derruba o Controle).
 on:
   push:
     branches: [main]
     paths-ignore:
       - 'servidor/**'
+      - 'celular/**'
       - '.github/**'
       - '**/*.md'
   workflow_dispatch:
@@ -39,7 +41,7 @@ jobs:
         env:
           NUMERO_VERSAO: ${{ github.run_number }}
           SERVIDOR_URL: https://painel-asx.somos-vinciag.workers.dev
-        run: gradle --no-daemon compileReleaseKotlin
+        run: gradle --no-daemon :app:compileReleaseKotlin
 
       - name: Preparar a chave de assinatura
         env:
@@ -56,7 +58,7 @@ jobs:
           NUMERO_VERSAO: ${{ github.run_number }}
           CHAVE_ARQUIVO: ${{ runner.temp }}/chave.p12
           SERVIDOR_URL: https://painel-asx.somos-vinciag.workers.dev
-        run: gradle --no-daemon assembleRelease
+        run: gradle --no-daemon :app:assembleRelease
 
       - name: Publicar a versao
         env:

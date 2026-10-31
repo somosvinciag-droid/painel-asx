@@ -68,6 +68,7 @@ class TelaCarro : Activity() {
 
     private lateinit var hora: TextView
     private lateinit var clima: TextView
+    private lateinit var celularBateria: TextView
     private lateinit var velocidade: TextView
     private lateinit var barra: BarraVelocidade
     private lateinit var limite: TextView
@@ -213,6 +214,9 @@ class TelaCarro : Activity() {
         topo.addView(texto("ASX GT", 22f, TEXTO, forte, 0.5f).apply {
             setOnLongClickListener { startActivity(Intent(this@TelaCarro, MainActivity::class.java)); true }
         }, lp(0, WRAP, 1f))
+        // Bateria do celular (só aparece com o app "Painel ASX Celular" ligado).
+        celularBateria = texto("", 18f, CINZA, normal, 0.1f).apply { visibility = View.GONE }
+        topo.addView(celularBateria, lp(WRAP, WRAP).apply { rightMargin = px(18) })
         clima = texto("—", 20f, CINZA, normal)
         topo.addView(clima, lp(WRAP, WRAP).apply { rightMargin = px(18) })
         hora = texto("--:--", 28f, TEXTO, normal)
@@ -350,11 +354,20 @@ class TelaCarro : Activity() {
             ctrl.addView(f, lp(0, px(80), 1f).apply { if (ctrl.childCount > 0) leftMargin = px(8) })
             return ic
         }
-        botao(Icone.ANTERIOR, false) { Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_PREVIOUS) }
-        playIcone = botao(Icone.PAUSA, true) {
-            if (!Musica.pararRadio()) Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+        // Música tocando na própria central (Spotify Connect): a tecla de mídia vai direto para ela (na hora).
+        // Senão: Android Auto pelo cabo (teclas pelo canal de entrada); senão o app do celular; senão a tecla de sempre.
+        botao(Icone.ANTERIOR, false) {
+            if (Musica.centralTocando(this) || !(AndroidAuto.controle("anterior") || Celular.controle("anterior")))
+                Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_PREVIOUS)
         }
-        botao(Icone.PROXIMA, false) { Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_NEXT) }
+        playIcone = botao(Icone.PAUSA, true) {
+            if (!Musica.pararRadio() && (Musica.centralTocando(this) || !(AndroidAuto.controle("alternar") || Celular.controle("alternar"))))
+                Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+        }
+        botao(Icone.PROXIMA, false) {
+            if (Musica.centralTocando(this) || !(AndroidAuto.controle("proxima") || Celular.controle("proxima")))
+                Rotina.teclaMidia(this, KeyEvent.KEYCODE_MEDIA_NEXT)
+        }
         dir.addView(ctrl, lp(MATCH, px(80)).apply { topMargin = px(14) })
 
         anjo.visibility = if (Musica.podeVerMusica(this)) View.GONE else View.VISIBLE
@@ -396,8 +409,14 @@ class TelaCarro : Activity() {
                 progresso.mostrar(if (t.duracaoMs > 0) (t.posicaoMs.toFloat() / t.duracaoMs).coerceIn(0f, 1f) else 0f)
                 playIcone.tipo = if (t.tocando) Icone.PAUSA else Icone.PLAY
             }
+            // Próxima curva do Android Auto: discreta, no rótulo pequeno embaixo do Jarvis (no lugar dos km do dia).
+            val nav = AndroidAuto.navegacaoTexto()
+            if (nav.isNotEmpty()) detalhe.por(nav)
         }
         if (tique % 5 == 0) {
+            val cel = Celular.bateriaCurta()
+            celularBateria.por(cel)
+            celularBateria.visibility = if (cel.isEmpty()) View.GONE else View.VISIBLE
             clima.por(Clima.curto())
             val kml = Diario.consumoMedio(this)
             consumo.por(kml?.let { "%.1f".format(BR, it) + " km/l" } ?: "— km/l")
@@ -408,7 +427,7 @@ class TelaCarro : Activity() {
             val d = Viagens.resumo(1, comLista = false)
             val km = "%.1f".format(BR, d.optDouble("km_total", 0.0))
             val manut = try { Diario.manutencao(this).firstOrNull { it.second }?.first } catch (_: Exception) { null }
-            detalhe.por("Hoje $km km em ${d.optInt("viagens")} viagens." + (manut?.let { " ${it.replaceFirstChar { c -> c.uppercase() }}." } ?: ""))
+            if (AndroidAuto.navegacaoTexto().isEmpty()) detalhe.por("Hoje $km km em ${d.optInt("viagens")} viagens." + (manut?.let { " ${it.replaceFirstChar { c -> c.uppercase() }}." } ?: ""))
         }
         if (tique % 30 == 0) Rede.emSegundoPlano("tela-inicial") {
             val ja = Nwd.somosTelaInicial(this)
@@ -433,6 +452,29 @@ class TelaCarro : Activity() {
     // ---------------------------------------------------------------- voz
 
     private fun ouvir() {
+        if (Ouvido.ouvindo || FontesDeVoz.algumaOuvindo) return
+        // O FALAR é sempre do Jarvis. Fonte de fora (app do celular) ouve e manda o texto; erro ou 8 s sem resposta:
+        // ouvido da central. Com o Android Auto pelo cabo: ouvido da central (ver FonteDeVoz).
+        val fonte = FontesDeVoz.escolher() ?: run { ouvirNaCentral(); return }
+        val pediu = fonte.ouvir({ etapa ->
+            estadoJarvis.text = "JARVIS · $etapa"
+            estadoJarvis.setTextColor(VERMELHO)
+        }) { texto, _ ->
+            estadoJarvis.setTextColor(CINZA)
+            if (texto != null) {
+                estadoJarvis.text = "OUVI: " + texto.uppercase().take(42)
+                relogio.postDelayed({ if (!Ouvido.ouvindo && !FontesDeVoz.algumaOuvindo) estadoJarvis.text = "JARVIS" }, 8000)
+                executar(texto)
+            } else {
+                estadoJarvis.text = "JARVIS"
+                ouvirNaCentral()
+            }
+        }
+        if (!pediu) ouvirNaCentral()
+    }
+
+    /** Ouvido da própria central (como antes do celular). */
+    private fun ouvirNaCentral() {
         if (Ouvido.ouvindo) return
         // Ouvido próprio (sem internet). Se ainda não baixou e a central tiver o app Google, usa o do Google.
         if (!Ouvido.baixado(this) && reconhecedorDoAndroid()) { ouvirPeloAndroid(); return }
@@ -464,7 +506,7 @@ class TelaCarro : Activity() {
         if (codigo != Ouvido.PEDIDO_MIC) return
         if (resultados.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
             Registro.anotar("ouvido: microfone liberado")
-            relogio.postDelayed({ ouvir() }, 400)
+            relogio.postDelayed({ ouvirNaCentral() }, 400)
         } else Voz.falar("Sem o microfone eu não consigo ouvir, senhor.")
     }
 
