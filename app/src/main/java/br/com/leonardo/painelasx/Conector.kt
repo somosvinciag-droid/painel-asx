@@ -144,6 +144,8 @@ object Conector {
         .put("ntfy", Config.topicoNtfy(ctx))
         .put("voz", Voz.qualVoz())
         .put("voz_propria", VozPropria.estado)
+        .put("ouvido", Ouvido.estado)
+        .put("microfone_liberado", Ouvido.temPermissao(ctx))
 
     private fun executar(ctx: Context, c: JSONObject) {
         val id = c.optString("id")

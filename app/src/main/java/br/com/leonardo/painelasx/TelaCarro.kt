@@ -422,6 +422,45 @@ class TelaCarro : Activity() {
     // ---------------------------------------------------------------- voz
 
     private fun ouvir() {
+        if (Ouvido.ouvindo) return
+        // Ouvido próprio (sem internet). Se ainda não baixou e a central tiver o app Google, usa o do Google.
+        if (!Ouvido.baixado(this) && reconhecedorDoAndroid()) { ouvirPeloAndroid(); return }
+        if (!Ouvido.temPermissao(this)) {
+            Voz.falar("Toque em Permitir para eu usar o microfone, senhor.")
+            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), Ouvido.PEDIDO_MIC)
+            return
+        }
+        Ouvido.ouvir(this, { etapa ->
+            estadoJarvis.text = "JARVIS · $etapa"
+            estadoJarvis.setTextColor(VERMELHO)
+        }) { texto, problema ->
+            estadoJarvis.setTextColor(CINZA)
+            if (texto != null) {
+                estadoJarvis.text = "OUVI: " + texto.uppercase().take(42)
+                relogio.postDelayed({ if (!Ouvido.ouvindo) estadoJarvis.text = "JARVIS" }, 8000)
+                executar(texto)
+            } else {
+                estadoJarvis.text = "JARVIS"
+                val p = problema ?: "Não ouvi nada, senhor."
+                fala.text = p
+                Voz.falar(p)
+            }
+        }
+    }
+
+    override fun onRequestPermissionsResult(codigo: Int, perms: Array<out String>, resultados: IntArray) {
+        super.onRequestPermissionsResult(codigo, perms, resultados)
+        if (codigo != Ouvido.PEDIDO_MIC) return
+        if (resultados.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            Registro.anotar("ouvido: microfone liberado")
+            relogio.postDelayed({ ouvir() }, 400)
+        } else Voz.falar("Sem o microfone eu não consigo ouvir, senhor.")
+    }
+
+    private fun reconhecedorDoAndroid() =
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).resolveActivity(packageManager) != null
+
+    private fun ouvirPeloAndroid() {
         estadoJarvis.text = "JARVIS · OUVINDO"
         estadoJarvis.setTextColor(VERMELHO)
         relogio.postDelayed({ estadoJarvis.text = "JARVIS"; estadoJarvis.setTextColor(CINZA) }, 6000)
@@ -434,7 +473,7 @@ class TelaCarro : Activity() {
             @Suppress("DEPRECATION")
             startActivityForResult(i, PEDIDO_VOZ)
         } catch (e: Exception) {
-            Voz.falar("A central não tem reconhecimento de voz. Instale o app Google pela Play Store.")
+            Voz.falar(Ouvido.explicacao())
         }
     }
 

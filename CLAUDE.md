@@ -115,3 +115,16 @@ mesma confirma a instalação; se o app estava aberto, reabre sozinho.
   instantâneo só com leitor OBD2 (suspenso). Comando de voz "consumo"/"quanto está o consumo".
 - Música: `Musica.tocando` (título, artista, capa, posição) pela sessão de mídia (precisa do acesso às notificações).
 - A voz do Jarvis continua a mesma (faber + grave 0,86): o Leonardo testou outras e preferiu manter.
+
+## v21: ouvido próprio (botão FALAR sem internet)
+
+- A central **não tem app de reconhecimento de voz** (o RecognizerIntent pedia para instalar um). `Ouvido`: Whisper base
+  multilíngue (int8, sherpa-onnx, `language="pt"`) + Silero VAD, ~160 MB baixados uma vez (continua de onde parou) da release
+  `ouvido-2` (workflow `ouvido-fala.yml`, pré-lançamento; NUNCA latest). Usa as `.so` do pacote `voz-1`.
+- FALAR: bipe, grava (VOICE_RECOGNITION, 16 kHz), para 0,9 s depois que ele para de falar (máx. 12 s), texto -> `Comandos`.
+  Mostra "OUVI: …" no rótulo do Jarvis. Filtra frases inventadas do Whisper ("legendas pela comunidade Amara.org"...).
+- Permissão RECORD_AUDIO pedida no primeiro FALAR (o Leonardo toca em Permitir). Se o app Google existir e o ouvido ainda não
+  baixou, usa o do Google. Memória < 12%: `Ouvido.liberar()`. Estado no conector: `ouvido`, `microfone_liberado`.
+- Teste com voz sintética: o base erra palavras curtas ("rota" -> "poto"); frases longas saem bem. O tiny era pior. Ajustar com
+  o que aparecer no registro ("ouvido: \"…\"").
+- Possível conflito: o assistente de fábrica (com.txznet.txz) pode segurar o microfone; o registro avisa "microfone parece mudo".

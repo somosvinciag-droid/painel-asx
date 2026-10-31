@@ -65,6 +65,8 @@ object Relogio {
             Registro.anotar("turbo automático: memória em $pct%")
             Turbo.limpar(ctx)
         }
+        // Memória muito curta: o ouvido (~250 MB) sai e volta a carregar no próximo FALAR.
+        if (pct < 12 && !Ouvido.ouvindo && Ouvido.estado == "pronto") Ouvido.liberar()
     }
 
     // ------------------------------------------------------------------ modo noite
