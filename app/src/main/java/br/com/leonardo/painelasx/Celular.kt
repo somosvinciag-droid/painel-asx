@@ -258,7 +258,7 @@ object Celular {
     /** Fala no carro, sem aparecer na tela nem no registro (privado). Nunca durante uma ligação. */
     private fun falarMensagem(quem: String, texto: String) {
         if (emLigacao()) return
-        Voz.falar("Mensagem de $quem: $texto", Voz.Tipo.IMPORTANTE, privado = true)
+        Voz.falarPrivado("Mensagem de $quem: $texto", Voz.Tipo.IMPORTANTE)
         Registro.anotar("celular: li uma mensagem em voz alta")
     }
 

@@ -172,8 +172,9 @@ object CaboUsb {
         val um = ctx.getSystemService(Context.USB_SERVICE) as UsbManager
         if (!um.hasPermission(d)) {
             // Mostra o "Permitir" do Android; quem toca é o Leonardo.
+            // MUTABLE: o Android preenche a resposta (aparelho + "permitido") neste aviso. Explícito (só para nós).
             val pi = PendingIntent.getBroadcast(ctx, 7, Intent(ACAO_PERMISSAO).setPackage(ctx.packageName),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             try { um.requestPermission(d, pi) } catch (e: Exception) { Registro.anotar("cabo USB: pedido de permissão falhou (${e.javaClass.simpleName})") }
             return
         }

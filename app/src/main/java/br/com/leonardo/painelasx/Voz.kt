@@ -95,15 +95,19 @@ object Voz {
     /** Fala o que ficou esperando a voz ficar pronta (chamar na linha principal). */
     fun esvaziarPendentes() {
         val fila = ArrayList(pendentes); pendentes.clear()
-        fila.forEach { falar(it.texto, it.tipo, it.entao, it.privado) }
+        fila.forEach { falarInterno(it.texto, it.tipo, it.entao, it.privado) }
     }
 
+    /** Fala. [entao] roda quando terminar de falar. */
+    fun falar(texto: String, tipo: Tipo = Tipo.RESPOSTA, entao: (() -> Unit)? = null) = falarInterno(texto, tipo, entao, false)
+
     /**
-     * Fala. [entao] roda quando terminar de falar.
-     * [privado] = texto do celular (mensagens): só é falado; não aparece na tela do carro (que o Controle e o
-     * Claude podem ler) nem vai para o Registro.
+     * Texto do celular (mensagens): só é falado. Não aparece na tela do carro (que o Controle e o Claude
+     * podem ler) nem vai para o Registro.
      */
-    fun falar(texto: String, tipo: Tipo = Tipo.RESPOSTA, entao: (() -> Unit)? = null, privado: Boolean = false) {
+    fun falarPrivado(texto: String, tipo: Tipo) = falarInterno(texto, tipo, null, true)
+
+    private fun falarInterno(texto: String, tipo: Tipo, entao: (() -> Unit)?, privado: Boolean) {
         if (texto.isBlank()) { entao?.invoke(); return }
         if (!pronta && !VozPropria.pronta()) {
             val pd = Pendente(texto, tipo, entao, privado)
