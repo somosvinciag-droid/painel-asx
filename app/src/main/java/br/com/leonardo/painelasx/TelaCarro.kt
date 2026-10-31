@@ -100,11 +100,13 @@ class TelaCarro : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        val t0 = android.os.SystemClock.elapsedRealtime()
         Voz.iniciar(this)
         ServicoFixo.iniciar(this)
         carregarFontes()
         montar()
         tratar(intent)
+        Registro.anotar("inicio: tela do carro ${android.os.SystemClock.elapsedRealtime() - t0} ms")
         // A central acabou de ligar/acordar e o Android nos abriu como tela inicial: o Jarvis cumprimenta.
         if (android.os.SystemClock.elapsedRealtime() - App.inicio < 20_000) {
             Registro.anotar("tela do carro: aberta pelo sistema (central ligou/acordou)")

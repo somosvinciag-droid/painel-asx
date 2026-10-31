@@ -30,16 +30,33 @@ object Viagens {
     private var paradoDesde = 0L
     private var ultimoSalvo = 0L
 
-    @Synchronized
+    @Volatile private var lendo = false
+
+    /**
+     * Lê o histórico (pode ser grande): roda fora da linha principal e lê o arquivo SEM segurar a trava,
+     * para a tela do carro (resumo do dia) não travar enquanto isso.
+     */
     fun iniciar(ctx: Context) {
-        if (arquivo != null) return
-        arquivo = File(ctx.filesDir, "viagens.json")
-        ultimoLocal = File(ctx.filesDir, "onde_parou.json")
+        synchronized(this) {
+            if (arquivo != null || lendo) return
+            lendo = true
+        }
+        val f = File(ctx.filesDir, "viagens.json")
+        val lidas = ArrayList<JSONObject>()
         try {
-            val a = JSONArray(arquivo!!.takeIf { it.exists() }?.readText() ?: "[]")
-            for (i in 0 until a.length()) viagens.add(a.getJSONObject(i))
+            val a = JSONArray(f.takeIf { it.exists() }?.readText() ?: "[]")
+            for (i in 0 until a.length()) lidas.add(a.getJSONObject(i))
         } catch (_: Exception) {
         }
+        terminarDeIniciar(ctx, f, lidas)
+    }
+
+    @Synchronized
+    private fun terminarDeIniciar(ctx: Context, f: File, lidas: List<JSONObject>) {
+        arquivo = f
+        ultimoLocal = File(ctx.filesDir, "onde_parou.json")
+        viagens.addAll(0, lidas)
+        lendo = false
         // Viagem que ficou aberta (a central desligou no meio): fecha com o último ponto salvo.
         val aberta = viagens.lastOrNull()
         if (aberta != null && !aberta.has("fim")) {

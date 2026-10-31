@@ -12,26 +12,80 @@ import java.util.Calendar
  *  - conversa: o que não for comando vai para o Claude pelo servidor (se a chave da API estiver lá).
  */
 object Jarvis {
-    private var ultimaPartida = 0L
+    @Volatile private var ultimaPartida = 0L
+
+    /** true enquanto a saudação toca (o ouvido só pré-carrega depois, para não disputar o processador). */
+    @Volatile var saudando = false
+        private set
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("config", Context.MODE_PRIVATE)
     fun musicaDeEntrada(ctx: Context) = prefs(ctx).getBoolean("musica_entrada", true)
     fun mudarMusicaDeEntrada(ctx: Context, v: Boolean) = prefs(ctx).edit().putBoolean("musica_entrada", v).apply()
 
-    /** O carro ligou (a central acabou de iniciar). */
-    fun partida(ctx: Context) {
+    /** Número do boot do Android (muda a cada vez que a central reinicia). -1 = não sei. */
+    private fun bootAtual(ctx: Context): Int = try {
+        android.provider.Settings.Global.getInt(ctx.contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
+    } catch (_: Exception) { -1 }
+
+    /** Já saudou desde que a central ligou desta vez (vale mesmo se o app foi fechado e reaberto). */
+    fun jaSaudouNesteBoot(ctx: Context): Boolean {
+        val p = prefs(ctx.applicationContext)
+        val bc = bootAtual(ctx)
+        // Pelo número do boot (não depende do relógio, que pode estar errado logo que a central liga).
+        if (bc >= 0 && p.contains("saudou_boot")) return p.getInt("saudou_boot", -2) == bc
+        val boot = System.currentTimeMillis() - SystemClock.elapsedRealtime()
+        return p.getLong("saudou_em", 0L) >= boot
+    }
+
+    /** Ainda falta saudar: não saudou neste boot, ou a central dormiu depois da última saudação. */
+    fun precisaSaudar(ctx: Context) = !jaSaudouNesteBoot(ctx) || devoSaudar(ctx)
+
+    /**
+     * Chamado logo no começo do processo (App.onCreate), antes de todo o resto: se for a partida
+     * (central acabou de ligar, ou acordou e ainda não saudou), a saudação gravada toca já.
+     * Só leituras rápidas aqui (preferências e uma propriedade da central), sem internet.
+     */
+    fun talvezPartidaNoInicio(ctx: Context) {
+        val t0 = SystemClock.elapsedRealtime()
+        val app = ctx.applicationContext
+        val motivo = try {
+            when {
+                SystemClock.elapsedRealtime() < 4 * 60_000L && !jaSaudouNesteBoot(app) -> "central ligou"
+                devoSaudar(app) && Despertador.estadoMcu() != "3" -> "central acordou"
+                else -> null
+            }
+        } catch (e: Exception) { null }
+        Registro.anotar("inicio: decidir partida ${SystemClock.elapsedRealtime() - t0} ms (${motivo ?: "não é partida"})")
+        if (motivo != null) partida(app)
+    }
+
+    /**
+     * O carro ligou (a central acabou de iniciar ou acordou).
+     * [forcar] = botão "Testar as boas-vindas": sauda mesmo que já tenha saudado nesta partida.
+     */
+    fun partida(ctx: Context, forcar: Boolean = false) {
         val app = ctx.applicationContext
         val agora = SystemClock.elapsedRealtime()
-        if (ultimaPartida != 0L && agora - ultimaPartida < 60_000) return
-        ultimaPartida = agora
-        prefs(app).edit().putLong("saudou_em", System.currentTimeMillis()).commit()
-        Registro.anotar("jarvis: carro ligou")
+        synchronized(this) {
+            if (ultimaPartida != 0L && agora - ultimaPartida < 60_000) return
+            // Proteção que sobrevive ao app ser fechado: não sauda 2 vezes na mesma partida
+            // (App, serviço fixo, tela do carro, anjo da guarda, despertador e LeitorCarro chamam isto).
+            if (!forcar && !precisaSaudar(app)) {
+                Registro.anotar("jarvis: já saudei nesta partida")
+                return
+            }
+            ultimaPartida = agora
+            saudando = true
+            prefs(app).edit().putLong("saudou_em", System.currentTimeMillis()).putInt("saudou_boot", bootAtual(app)).commit()
+        }
+        Registro.anotar("jarvis: carro ligou (${SystemClock.elapsedRealtime() - App.inicio} ms depois de o app começar)")
         val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         val periodo = when { h < 12 -> "manha"; h < 18 -> "tarde"; else -> "noite" }
         val primeiraDoDia = primeiraVezHoje(app)
         // 1) Na hora: tela do carro + saudação já gravada (não espera a voz carregar).
         Rede.naTela { Painel.abrir(app) }
         val depoisDaSaudacao = {
+            saudando = false
             Rede.emSegundoPlano("partida") {
                 // 2) Depois: tempo e lembretes (com a voz carregada), Turbo e a música.
                 Clima.atualizar(app)
@@ -48,6 +102,8 @@ object Jarvis {
             }
             Unit
         }
+        // Se a saudação travar por algum motivo, não segura o ouvido para sempre.
+        Rede.principal.postDelayed({ saudando = false }, 30_000)
         if (!VozPropria.tocarSaudacao(app, periodo, depoisDaSaudacao)) {
             val s = when (periodo) { "manha" -> "Bom dia"; "tarde" -> "Boa tarde"; else -> "Boa noite" }
             Rede.naTela { Voz.falar("$s, Leonardo. Tudo bem? Sistemas online, às suas ordens.", Voz.Tipo.RESPOSTA) { depoisDaSaudacao() } }

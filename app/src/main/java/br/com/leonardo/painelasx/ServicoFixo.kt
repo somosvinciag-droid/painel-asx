@@ -60,18 +60,24 @@ class ServicoFixo : Service() {
         } else {
             startForeground(ID, n)
         }
-        Registro.anotar("servico fixo: ligado")
-        Conector.iniciar(this)
-        Atualizador.agendar(this)
-        Voz.iniciar(this)
-        Lugares.iniciar(this)
-        LeitorCarro.iniciar(this)
-        Barra.mostrar(this)
-        Relogio.iniciar(this)
+        Registro.anotar("servico fixo: ligado (${android.os.SystemClock.elapsedRealtime() - App.inicio} ms depois de o app começar)")
         // A central reinicia quando o carro dá a partida: se ligou há pouco, é o carro ligando.
+        // (Normalmente o App já saudou; aqui é reserva. O Jarvis não sauda 2 vezes na mesma partida.)
         if (android.os.SystemClock.elapsedRealtime() < 4 * 60_000L) {
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ Jarvis.partida(this) }, 300)
+            android.os.Handler(android.os.Looper.getMainLooper()).post { Jarvis.partida(this) }
         }
+        // Na linha principal só o que precisa dela (voz do Android, barra, relógio); o resto em segundo plano,
+        // para a tela e a saudação não ficarem esperando (na partida de 31/10 a linha principal ficou ~15 s ocupada).
+        medirInicio("voz") { Voz.iniciar(this) }
+        medirInicio("barra") { Barra.mostrar(this) }
+        medirInicio("relogio") { Relogio.iniciar(this) }
+        val app = applicationContext
+        Thread({
+            medirInicio("conector") { Conector.iniciar(app) }
+            medirInicio("atualizador") { Atualizador.agendar(app) }
+            medirInicio("lugares") { Lugares.iniciar(app) }
+            medirInicio("leitor do carro") { LeitorCarro.iniciar(app) }
+        }, "inicio").start()
         try {
             registerReceiver(desligando, android.content.IntentFilter(Intent.ACTION_SHUTDOWN))
         } catch (_: Exception) {

@@ -291,7 +291,7 @@ class MainActivity : Activity() {
             Jarvis.mudarMusicaDeEntrada(this, it)
         })
         jv.addView(botao("▶  Testar as boas-vindas", BOTAO, OURO, 16f).apply {
-            setOnClickListener { Jarvis.partida(applicationContext) }
+            setOnClickListener { Jarvis.partida(applicationContext, forcar = true) }
         }, alto())
         jv.addView(rotulo("Avisos no celular (estacionamento, lembretes): instale o app \"ntfy\" no celular e assine este canal:"))
         jv.addView(botao("📋  Copiar o canal: " + Config.topicoNtfy(this), BOTAO, TEXTO, 14f).apply {

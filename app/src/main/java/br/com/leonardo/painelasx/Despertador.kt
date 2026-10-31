@@ -23,7 +23,13 @@ object Despertador {
     const val ACAO = "br.com.leonardo.painelasx.ACORDAR"
     private const val JOB = 4812
 
+    /** Estado da central ("3" = dormindo). Lê direto (rápido); se o Android não deixar, pergunta ao getprop. */
     fun estadoMcu(): String = try {
+        val c = Class.forName("android.os.SystemProperties")
+        (c.getMethod("get", String::class.java).invoke(null, "sys.nwd.mcu.state") as? String)?.trim() ?: estadoMcuGetprop()
+    } catch (_: Throwable) { estadoMcuGetprop() }
+
+    private fun estadoMcuGetprop(): String = try {
         val p = ProcessBuilder("getprop", "sys.nwd.mcu.state").redirectErrorStream(true).start()
         val t = p.inputStream.bufferedReader().readText().trim()
         p.waitFor()

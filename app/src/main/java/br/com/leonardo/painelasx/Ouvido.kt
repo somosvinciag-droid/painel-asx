@@ -160,8 +160,8 @@ object Ouvido {
                 }
                 // Já fechou o app uma vez: não carrega sozinho (só quando ele tocar em FALAR).
                 quebras(ctx) == 1 -> estado = "pronto (carrega ao falar)"
-                // Carrega já se houver memória sobrando; senão, carrega no primeiro toque em FALAR.
-                memoriaLivreMb(ctx) > 550 -> carregar(ctx)
+                // Pré-carrega (se houver memória sobrando) só depois que a partida assentar; senão, no primeiro FALAR.
+                memoriaLivreMb(ctx) > 550 -> preCarregarDepoisDaPartida(ctx)
                 else -> {
                     estado = "pronto (carrega ao falar)"
                     Registro.anotar("ouvido: pronto; carrego quando o senhor falar (memória curta)")
@@ -171,6 +171,35 @@ object Ouvido {
             estado = "esperando a internet"
             Registro.anotar("ouvido: não baixou agora (${e.javaClass.simpleName}: ${e.message}); tento de novo em 5 min")
             h?.postDelayed({ baixarECarregar(ctx) }, 5 * 60_000)
+        }
+    }
+
+    /**
+     * Pré-carga do ouvido (pesada: ~2 s de processador e muita memória). Espera a partida assentar: a saudação
+     * terminar e no mínimo 20 s desde que o app começou, o que vier por último (no máximo 60 s esperando a saudação).
+     * Se ele tocar em FALAR antes, o ouvir() carrega na hora; quando esta pré-carga rodar, já está carregado.
+     * Roda na linha "ouvido" sem prender a linha (só reagenda).
+     */
+    private fun preCarregarDepoisDaPartida(ctx: Context) {
+        val desdeInicio = SystemClock.elapsedRealtime() - App.inicio
+        val falta = when {
+            desdeInicio < 20_000 -> 20_000 - desdeInicio
+            Jarvis.saudando && desdeInicio < 60_000 -> 1_000L
+            else -> 0L
+        }
+        if (falta > 0) {
+            estado = "pronto (carrega depois da partida)"
+            h?.postDelayed({ preCarregarDepoisDaPartida(ctx) }, falta)
+            return
+        }
+        if (rec != null) { estado = "pronto"; return }
+        if (ouvindo) return   // o FALAR está carregando/ouvindo agora
+        if (memoriaLivreMb(ctx) > 550) {
+            Registro.anotar("ouvido: pré-carga ${desdeInicio / 1000} s depois de o app começar")
+            carregar(ctx)
+        } else {
+            estado = "pronto (carrega ao falar)"
+            Registro.anotar("ouvido: pronto; carrego quando o senhor falar (memória curta)")
         }
     }
 

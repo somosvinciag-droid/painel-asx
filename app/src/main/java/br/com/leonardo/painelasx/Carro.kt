@@ -23,7 +23,7 @@ object Carro {
     @Volatile var ultimoAviso = ""
         private set
 
-    private var appCtx: Context? = null
+    @Volatile private var appCtx: Context? = null
 
     // velocidade
     private var acimaDesde = 0L
