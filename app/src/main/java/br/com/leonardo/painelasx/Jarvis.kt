@@ -24,6 +24,7 @@ object Jarvis {
         val agora = SystemClock.elapsedRealtime()
         if (ultimaPartida != 0L && agora - ultimaPartida < 60_000) return
         ultimaPartida = agora
+        prefs(app).edit().putLong("saudou_em", System.currentTimeMillis()).commit()
         Registro.anotar("jarvis: carro ligou")
         val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         val periodo = when { h < 12 -> "manha"; h < 18 -> "tarde"; else -> "noite" }
@@ -59,6 +60,23 @@ object Jarvis {
                 if (r != null) Rede.naTela { Voz.falar(r, Voz.Tipo.INFO) }
             }
         }
+    }
+
+    /** Verdadeiro se a central dormiu depois da última saudação (para saudar uma vez a cada vez que o carro liga). */
+    fun devoSaudar(ctx: Context): Boolean {
+        val p = prefs(ctx.applicationContext)
+        val dormiu = p.getLong("dormiu_em", 0L)
+        val saudou = p.getLong("saudou_em", 0L)
+        if (dormiu > saudou) return true
+        // A central pode fechar o app antes de avisar que vai dormir: se faz mais de 10 min da última saudação
+        // e o app não acabou de ser atualizado, também é o carro ligando de novo.
+        val agora = System.currentTimeMillis()
+        val atualizou = try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).lastUpdateTime } catch (_: Exception) { 0L }
+        return agora - saudou > 10 * 60_000L && agora - atualizou > 3 * 60_000L
+    }
+
+    fun dormiu(ctx: Context) {
+        prefs(ctx.applicationContext).edit().putLong("dormiu_em", System.currentTimeMillis()).commit()
     }
 
     private fun primeiraVezHoje(ctx: Context): Boolean {

@@ -62,6 +62,7 @@ class TelaCarro : Activity() {
     private lateinit var semana: TextView
     private lateinit var aviso: TextView
     private lateinit var sistema: Button
+    private lateinit var anjo: Button
 
     private val atualizar = object : Runnable {
         override fun run() {
@@ -223,6 +224,9 @@ class TelaCarro : Activity() {
         c3.addView(linhaBaixo, LinearLayout.LayoutParams(-1, 0, 0.8f).apply { topMargin = dp(10) })
         sistema = botao("★  Fazer do Painel ASX o sistema do carro", VERMELHO_ESCURO, BRANCO, 14f) { virarTelaInicial() }
         c3.addView(sistema, LinearLayout.LayoutParams(-1, 0, 0.7f).apply { topMargin = dp(10) })
+        anjo = botao("🛡  Ligar o Jarvis voltar sozinho", VERMELHO_ESCURO, BRANCO, 14f) { ligarAnjo() }
+        anjo.visibility = if (Musica.podeVerMusica(this)) View.GONE else View.VISIBLE
+        c3.addView(anjo, LinearLayout.LayoutParams(-1, 0, 0.7f).apply { topMargin = dp(10) })
         raiz.addView(c3, lp(0.75f, 14))
     }
 
@@ -251,8 +255,22 @@ class TelaCarro : Activity() {
             aviso.text = Voz.ultimaFala
             if (tique % 30 == 0) Rede.emSegundoPlano("tela-inicial") {
                 val ja = Nwd.somosTelaInicial(this)
-                Rede.naTela { sistema.visibility = if (ja) View.GONE else View.VISIBLE }
+                Rede.naTela {
+                    sistema.visibility = if (ja) View.GONE else View.VISIBLE
+                    anjo.visibility = if (Musica.podeVerMusica(this)) View.GONE else View.VISIBLE
+                }
             }
+        }
+    }
+
+    /** Uma vez só: liga o "acesso às notificações", que o Android religa sozinho depois que a central fecha o app. */
+    private fun ligarAnjo() {
+        Voz.falar("Na próxima tela, ligue o Painel ASX. É uma vez só, senhor.", Voz.Tipo.RESPOSTA)
+        try {
+            startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        } catch (e: Exception) {
+            Registro.anotar("anjo da guarda: tela de ajustes não abriu (${e.javaClass.simpleName})")
+            Voz.falar("Não consegui abrir os ajustes. Peça ao Claude para ligar pelo notebook.", Voz.Tipo.RESPOSTA)
         }
     }
 

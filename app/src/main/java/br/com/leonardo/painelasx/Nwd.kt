@@ -65,7 +65,11 @@ object Nwd {
         val o = JSONObject()
         for (p in listOf(PROP_LAUNCHER, "persist.nwd.autowakeup", "sys.wake.app.self.start.enable", "sys.whitelist.enable",
             "ro.build.type", "ro.debuggable", "ro.secure", "ro.adb.secure", "ro.nwd.config.path", "service.adb.tcp.port",
-            "persist.adb.tcp.port", "sys.nwd.mcu.state")) o.put(p, prop(p))
+            "persist.adb.tcp.port", "sys.nwd.mcu.state", "ro.build.tags", "ro.boot.verifiedbootstate", "ro.boot.flash.locked",
+            "ro.boot.vbmeta.device_state", "ro.treble.enabled", "ro.boot.dynamic_partitions", "ro.product.board", "ro.build.fingerprint",
+            "persist.sys.usb.config", "ro.config.low_ram")) o.put(p, prop(p))
+        o.put("anjo_da_guarda_ligado", try { Musica.podeVerMusica(ctx) } catch (_: Exception) { false })
+        o.put("somos_tela_inicial", somosTelaInicial(ctx))
         for (k in listOf("appautorun_packagename", "whitelist_packagename", "nwd_factory_password")) {
             o.put("settings.$k", try { Settings.System.getString(ctx.contentResolver, k) ?: "" } catch (e: Exception) { "erro: ${e.javaClass.simpleName}" })
         }

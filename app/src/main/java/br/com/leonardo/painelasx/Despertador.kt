@@ -32,6 +32,7 @@ object Despertador {
 
     /** Chamado quando a central vai dormir. */
     fun marcar(ctx: Context) {
+        try { Jarvis.dormiu(ctx) } catch (_: Exception) { }
         try {
             val i = Intent(ctx, Inicio::class.java).setAction(ACAO)
             val pi = PendingIntent.getBroadcast(ctx, 77, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
