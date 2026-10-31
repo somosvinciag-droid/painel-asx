@@ -69,6 +69,17 @@ object Comandos {
 
     /** Comandos novos (v14): lugares, música, rádio, diário, avisos, tempo. null = não é nenhum destes. */
     private fun rapido(ctx: Context, t: String, falado: String): String? {
+        // "informações do app ZLink": abre a página do app nas Configurações (desativar, forçar parada).
+        Regex("^(abre |abrir )?(as )?(informacoes|informacao|detalhes|pagina|configuracoes|ajustes) do (app|aplicativo) (.+)$").find(t)?.let {
+            val nome = it.groupValues[5]
+            val pacote = if (nome.contains("zlink") || nome.contains("z link")) "com.zjinnova.zlink" else Apps.procurar(ctx, nome)?.pacote
+                ?: return "Não achei o app \"$nome\"."
+            return try {
+                ctx.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(android.net.Uri.parse("package:$pacote")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                "Abri a página do ${Apps.nomeDe(ctx, pacote)}. Toque em Desativar ou em Forçar parada."
+            } catch (e: Exception) { "Não consegui abrir a página desse app." }
+        }
         // Limite de velocidade
         Regex("^(muda o |mudar o |coloca o |poe o )?limite( de velocidade)?( para| pra| em| de)? (\\d{2,3})").find(t)?.let {
             val v = it.groupValues[4].toInt()
