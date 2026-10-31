@@ -8,8 +8,14 @@ import android.util.Log
  * anotado no Registro (aparece em "Ver diagnóstico na tela").
  */
 class App : Application() {
+    companion object {
+        /** Quando este processo começou (para saber se a central acabou de ligar/acordar e nos abriu). */
+        @Volatile var inicio = 0L
+    }
+
     override fun onCreate() {
         super.onCreate()
+        inicio = android.os.SystemClock.elapsedRealtime()
         Registro.iniciar(this)
         val anterior = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { th, erro ->

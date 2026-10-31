@@ -56,8 +56,23 @@
         <!-- Tela do carro (preta e vermelha): abre quando o carro liga. -->
         <activity
             android:name=".TelaCarro"
-            android:exported="false"
+            android:exported="true"
             android:launchMode="singleTask"
+            android:clearTaskOnLaunch="true"
+            android:stateNotNeeded="true"
+            android:taskAffinity="br.com.leonardo.painelasx.carro"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
+            <!-- Pode ser a tela inicial da central: o Android a abre sempre que a central liga ou acorda. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".TodosApps"
+            android:exported="false"
             android:taskAffinity="br.com.leonardo.painelasx.carro"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
 

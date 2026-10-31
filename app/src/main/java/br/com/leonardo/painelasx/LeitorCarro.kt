@@ -392,6 +392,7 @@ object LeitorCarro {
         val sinaisJson = JSONObject()
         sinais.entries.sortedByDescending { it.value.optLong("hora") }.take(60).forEach { sinaisJson.put(it.key, it.value) }
         return JSONObject()
+            .put("nwd", try { Nwd.relatorio(ctx) } catch (e: Exception) { JSONObject().put("erro", e.message) })
             .put("re_engatada", re)
             .put("re_mudou_em", if (reDesde > 0) reDesde else JSONObject.NULL)
             .put("tela_atual", Controle.ativo?.telaAtual ?: "")

@@ -92,6 +92,8 @@ object Barra {
         } else {
             // Tela do carro (início)
             coluna.addView(icone(ctx, null, "Painel") { Painel.abrir(ctx) })
+            // Voltar (como a tecla do volante, sem Acessibilidade)
+            coluna.addView(icone(ctx, "↩", "Voltar") { Nwd.tecla(ctx, Nwd.VOLTAR) })
             // Microfone (fala um comando)
             coluna.addView(icone(ctx, "🎤", "Falar") {
                 Painel.abrir(ctx, ouvir = true)
