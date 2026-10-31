@@ -88,6 +88,7 @@ class AcordaJob : JobService() {
     override fun onStartJob(params: JobParameters?): Boolean {
         Registro.iniciar(this)
         Despertador.talvezAcordou(this, "internet voltou")
+        try { Ouvido.internetVoltou() } catch (_: Exception) { }
         return false
     }
 

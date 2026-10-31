@@ -120,6 +120,7 @@ object Conector {
                 // Espera comando do Claude (ate ~20 s)
                 val r = pedir("GET", "/app/comandos", null, leituraMs = 35_000)
                 if (r.first != 200) throw Exception("comandos deu ${r.first}")
+                if (!online) try { Ouvido.internetVoltou() } catch (_: Exception) { }
                 online = true
                 ultimoErro = ""
                 espera = 3000L
