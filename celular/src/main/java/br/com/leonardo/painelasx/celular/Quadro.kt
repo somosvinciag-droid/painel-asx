@@ -83,6 +83,11 @@ class Conexao(
     @Volatile var id = ""
     @Volatile var ultimoRecebido = SystemClock.elapsedRealtime()
         private set
+    /** Quantas mensagens chegaram (0 = o outro lado nunca respondeu: no cabo, pode ser outro app com ele). */
+    @Volatile var recebidas = 0L
+        private set
+    /** O outro lado já respondeu ao "olá" (quem usa marca). */
+    @Volatile var respondeu = false
     val viva get() = !fechada.get()
 
     /** Coloca na fila de envio. Devolve false se a conexão caiu. */
@@ -114,6 +119,7 @@ class Conexao(
                 ultimoRecebido = SystemClock.elapsedRealtime()
                 j.alimentar(buf, n) { s ->
                     val o = JSONObject(s)   // texto que não é JSON = fecha (protege de lixo no canal)
+                    recebidas++
                     try { aoChegar(this, o) } catch (_: Exception) { }
                 }
             }

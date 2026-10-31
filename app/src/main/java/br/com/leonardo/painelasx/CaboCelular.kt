@@ -28,9 +28,8 @@ class CanalRede(private val s: Socket) : Canal {
 
 /**
  * Ligação da central com o app "Painel ASX Celular".
- *  - Fase 1 (padrão): descobre o celular pelo gateway da rede Bluetooth (ancoragem) e conecta na porta 48110.
- *  - Fase 2 (interruptor "Cabo: Painel ASX", desligado por padrão): o CaboUsb entrega um canal pelo cabo (AOA),
- *    que tem prioridade sobre a rede.
+ *  - Cabo (AOA, padrão desde 31/10): o CaboUsb entrega um canal pelo cabo, que tem prioridade sobre a rede.
+ *  - Reserva: descobre o celular pelo gateway da rede Bluetooth (ancoragem) e conecta na porta 48110.
  * Reconecta sozinho; ping a cada 5 s; sem resposta por 15 s = caiu. Uma linha lê, outra escreve.
  */
 object CaboCelular {
@@ -82,7 +81,7 @@ object CaboCelular {
     /** O cabo (AOA) abriu um canal: ele assume no lugar da rede. */
     fun entregarCabo(canal: Canal) {
         caboPronto.getAndSet(canal)?.fechar()
-        conexao?.fechar("o cabo assumiu")
+        conexao?.takeIf { it.canal !== canal }?.fechar("o cabo assumiu")
         acordar()
     }
 
@@ -97,7 +96,11 @@ object CaboCelular {
 
     fun acordar() = synchronized(sino) { sino.notifyAll() }
 
-    private fun esperar(ms: Long) = synchronized(sino) { try { sino.wait(ms) } catch (_: InterruptedException) { } }
+    /** Espera [ms] ou até o cabo chegar (confere antes de dormir: o aviso do cabo não se perde). */
+    private fun esperar(ms: Long) = synchronized(sino) {
+        if (caboPronto.get() != null) return@synchronized
+        try { sino.wait(ms) } catch (_: InterruptedException) { }
+    }
 
     private fun mudarEstado(e: String) {
         if (e == estado) return
@@ -105,11 +108,18 @@ object CaboCelular {
         Registro.anotar("celular: $e")
     }
 
+    private fun ola(ctx: Context) = JSONObject().put("t", "ola").put("proto", 1).put("app", BuildConfig.VERSION_CODE)
+        .put("id", idCentral(ctx)).put("nome", "Painel ASX do ASX").put("mensagens", Celular.lerMensagens(ctx))
+
     private fun laco(ctx: Context) {
         var espera = 5_000L
         while (true) {
             var canal: Canal? = caboPronto.getAndSet(null)
-            if (canal == null && SystemClock.elapsedRealtime() >= pausadoAte) canal = conectarRede(ctx)
+            if (canal == null && SystemClock.elapsedRealtime() >= pausadoAte) {
+                canal = conectarRede(ctx)
+                // O cabo chegou enquanto a rede conectava: o cabo vem primeiro (antes a rede ficava e o cabo esperava).
+                if (canal != null && caboPronto.get() != null) { canal.fechar(); continue }
+            }
             if (canal == null) {
                 esperar(if (estado == SEM_BT || SystemClock.elapsedRealtime() < pausadoAte) 10_000 else espera)
                 espera = (espera * 2).coerceAtMost(30_000)
@@ -119,10 +129,15 @@ object CaboCelular {
             val c = Conexao(canal, 5_000, 15_000, { cx, o -> Celular.receber(ctx, cx, o) }, { cx, m -> caiu(cx, m) })
             conexao = c
             mudarEstado("conectado pela ${canal.tipo}, esperando o olá do celular")
-            c.mandar(JSONObject().put("t", "ola").put("proto", 1).put("app", BuildConfig.VERSION_CODE)
-                .put("id", idCentral(ctx)).put("nome", "Painel ASX do ASX").put("mensagens", Celular.lerMensagens(ctx)))
+            c.mandar(ola(ctx))
+            repetirOla(ctx, c)
             c.rodar("celular")
             conexao = null
+            val cabo = canal as? CanalAoa
+            if (cabo != null && SystemClock.elapsedRealtime() >= pausadoAte) {
+                // Cabo caiu com o celular ainda plugado (app do celular reiniciou, central dormiu...): abre de novo.
+                try { CaboUsb.caboTerminou(ctx, cabo.nomeAparelho, c.respondeu, SystemClock.elapsedRealtime() - inicio) } catch (_: Exception) { }
+            }
             if (caboPronto.get() != null) continue
             // Conexão que cai logo (algo aceita e fecha na hora): espera cada vez mais (até 60 s),
             // para não ficar reconectando de 2 em 2 s e enchendo o registro.
@@ -134,6 +149,25 @@ object CaboCelular {
                 esperar(2_000)
             }
         }
+    }
+
+    /**
+     * Repete o "olá" de 3 em 3 s até o celular responder. O 1º pode se perder (o app do celular ainda abrindo o cabo,
+     * ou reabrindo depois de a central dormir). No cabo, 10 s sem NADA do outro lado = não é o nosso app (ZLink?).
+     */
+    private fun repetirOla(ctx: Context, c: Conexao) {
+        Thread({
+            val t0 = SystemClock.elapsedRealtime()
+            while (c.viva && !c.respondeu) {
+                try { Thread.sleep(3_000) } catch (_: InterruptedException) { return@Thread }
+                if (!c.viva || c.respondeu) break
+                if (c.canal is CanalAoa && c.recebidas == 0L && SystemClock.elapsedRealtime() - t0 >= 10_000) {
+                    c.fechar("o celular não respondeu pelo cabo em 10 s")
+                    break
+                }
+                c.mandar(ola(ctx))
+            }
+        }, "celular-ola").apply { isDaemon = true }.start()
     }
 
     private fun caiu(c: Conexao, motivo: String) {

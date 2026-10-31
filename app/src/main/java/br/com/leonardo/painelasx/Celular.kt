@@ -70,6 +70,8 @@ object Celular {
     fun receber(ctx: Context, cx: Conexao, o: JSONObject) {
         when (o.optString("t")) {
             "ola" -> {
+                cx.respondeu = true
+                if (cx.canal.tipo == "cabo") CaboUsb.caboRespondeu()
                 ligado = true
                 pareando = false
                 transporte = cx.canal.tipo
@@ -80,6 +82,7 @@ object Celular {
                 Registro.anotar("celular: ligado pela ${if (transporte == "cabo") "cabo USB" else "rede Bluetooth"} ($modelo, Android $android, app c$versaoApp)")
             }
             "pareando" -> {
+                cx.respondeu = true
                 if (!pareando) {
                     pareando = true
                     Registro.anotar("celular: esperando o Leonardo tocar em Permitir no celular (código ${o.optString("codigo").take(8)})")
@@ -87,6 +90,7 @@ object Celular {
                 }
             }
             "recusado" -> {
+                cx.respondeu = true
                 pareando = false
                 Registro.anotar("celular: o celular recusou esta central (tento de novo em 10 min)")
                 CaboCelular.pausar(10 * 60_000L)

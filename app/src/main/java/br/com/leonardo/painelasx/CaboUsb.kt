@@ -44,13 +44,20 @@ class CanalAoa(
         return if (r > 0) r else 0
     }
 
+    /**
+     * Escreve tudo. Logo depois de o celular entrar no modo acessório, o app dele ainda está abrindo o cabo e
+     * não lê nada: o USB recusa (cada tentativa espera 1 s). Antes, a 1ª recusa derrubava a conversa e o cabo
+     * não era tentado de novo. Agora insiste por até 10 s (só mensagens pequenas vão da central ao celular).
+     */
     override fun escrever(b: ByteArray) {
         var pos = 0
+        val limite = SystemClock.elapsedRealtime() + 10_000
         while (pos < b.size) {
+            if (fechado) throw IOException("cabo: fechado")
             val n = minOf(16384, b.size - pos)
-            val parte = if (pos == 0 && n == b.size) b else b.copyOfRange(pos, pos + n)
-            if (con.bulkTransfer(saida, parte, n, 1000) < 0) throw IOException("cabo: escrita falhou")
-            pos += n
+            val r = con.bulkTransfer(saida, b, pos, n, 1000)
+            if (r > 0) { pos += r; continue }
+            if (SystemClock.elapsedRealtime() > limite) throw IOException("cabo: o celular não leu em 10 s")
         }
         // Tamanho múltiplo do pacote USB: manda um pacote vazio para o outro lado saber que acabou.
         if (saida.maxPacketSize > 0 && b.size % saida.maxPacketSize == 0) con.bulkTransfer(saida, ByteArray(0), 0, 1000)
@@ -66,10 +73,14 @@ class CanalAoa(
 
 /**
  * Cabo USB do celular.
- *  - Interruptor "Cabo: Painel ASX / Android Auto" (padrão: Android Auto). Com "Android Auto", a central NÃO mexe
- *    no cabo: nenhum filtro USB ligado, nenhum pedido de modo acessório. O ZLink continua como sempre.
- *  - Com "Painel ASX": liga o filtro USB do app (activity-alias), pede a permissão do Android (o Leonardo toca em
- *    Permitir; nunca apertamos sozinhos) e manda o celular para o modo acessório com os textos do Painel.
+ *  - Interruptor "Cabo USB do celular para o Painel ASX" (padrão LIGADO desde 31/10; desligado = Android Auto). Desligado,
+ *    a central NÃO mexe no cabo: nenhum filtro USB ligado, nenhum pedido de modo acessório.
+ *  - Ligado: o filtro USB do app (activity-alias) faz o Android abrir a CaboActivity ao plugar. Na 1ª vez o Leonardo
+ *    escolhe "Painel ASX" e marca "usar por padrão"/"Sempre" (nunca apertamos sozinhos); depois o Android dá a permissão
+ *    sozinho a cada plugada. Então a central manda o celular para o modo acessório com os textos do Painel.
+ *  - Nunca pergunta a permissão sem parar: no máximo [MAX_PEDIDOS] vezes seguidas sem o "usar por padrão" funcionar.
+ *  - O celular no modo acessório que não responde (outro app, como o ZLink/Android Auto, pegou o cabo) é largado e a
+ *    central segue pela rede Bluetooth até o cabo ser solto.
  *  - Diagnóstico (só leitura) para saber se o ZLink pega o cabo com permissão automática (caso B) ou não (caso A).
  */
 object CaboUsb {
@@ -79,6 +90,16 @@ object CaboUsb {
     private const val ACAO_PERMISSAO = "br.com.leonardo.painelasx.PERMISSAO_USB"
     private const val ZLINK = "com.zjinnova.zlink"
     const val ALIAS = "br.com.leonardo.painelasx.CaboPeloPainel"
+    private const val MAX_PEDIDOS = 4
+
+    // De onde veio o aparelho (muda o que fazemos sem permissão).
+    private const val AVISO = 0        // aviso USB_DEVICE_ATTACHED do Android
+    private const val SISTEMA = 1      // o Android abriu a CaboActivity (somos o "padrão": a permissão já vem junto)
+    private const val PROCURA = 2      // o app abriu/voltou e o aparelho já estava plugado
+    private const val REVER = 3        // aviso sem permissão, conferido de novo 1,5 s depois
+    private const val DE_NOVO = 4      // o cabo caiu com o aparelho ainda plugado: abrir de novo
+    private const val PERMITIU = 5     // o Leonardo tocou em Permitir
+    private const val REVER_TARDE = 6  // ainda sem permissão 15 s depois (ninguém respondeu ao "Abrir com" do Android)
 
     // Os mesmos textos do accessory_filter.xml do app do celular (fabricante + modelo). Sempre com a versão.
     private val TEXTOS = arrayOf(
@@ -91,13 +112,23 @@ object CaboUsb {
     private val vistos = ArrayDeque<String>()
     private var ultimoTratado = ""
     private var ultimoTratadoEm = 0L
+    /** Quando ESTE processo mandou um celular para o modo acessório (1ª vez: o Leonardo pode demorar no celular). */
+    @Volatile private var trocouEm = 0L
+    /** Aparelhos no modo acessório que não responderam: largados até o cabo ser solto. */
+    private val alheios = HashSet<String>()
+    /** Tentativas seguidas de reabrir o cabo de cada aparelho (zera quando o celular responde). */
+    private val tentativas = HashMap<String, Int>()
+    @Volatile var aviso = ""
+        private set
 
     /** Padrão (decisão do Leonardo, 31/10): o cabo é do Painel ASX; o Android Auto com fio fica para o interruptor. */
     fun usarCabo(ctx: Context) = CaboCelular.prefs(ctx).getBoolean("cabo_painel", true)
 
     /** O Leonardo mudou o interruptor. Depois de mudar, é preciso tirar e pôr o cabo. */
     fun mudarCabo(ctx: Context, painel: Boolean) {
-        CaboCelular.prefs(ctx).edit().putBoolean("cabo_painel", painel).apply()
+        CaboCelular.prefs(ctx).edit().putBoolean("cabo_painel", painel).putInt("cabo_pedidos", 0).apply()
+        aviso = ""
+        synchronized(this) { alheios.clear(); tentativas.clear() }
         try {
             ctx.packageManager.setComponentEnabledSetting(
                 ComponentName(ctx.packageName, ALIAS),
@@ -111,6 +142,7 @@ object CaboUsb {
         if (painel) procurarJaPlugado(ctx)
     }
 
+    @Synchronized
     fun preparar(ctx: Context) {
         val a = ctx.applicationContext
         app = a
@@ -135,12 +167,16 @@ object CaboUsb {
                 @Suppress("DEPRECATION")
                 val d = i.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE) ?: return
                 when (i.action) {
-                    UsbManager.ACTION_USB_DEVICE_ATTACHED -> plugou(a, d)
-                    UsbManager.ACTION_USB_DEVICE_DETACHED -> { anotar("soltou", d); CaboCelular.soltouCabo(d.deviceName) }
+                    UsbManager.ACTION_USB_DEVICE_ATTACHED -> plugou(a, d, doSistema = false)
+                    UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                        anotar("soltou", d)
+                        synchronized(this@CaboUsb) { alheios.remove(d.deviceName); tentativas.remove(d.deviceName) }
+                        CaboCelular.soltouCabo(d.deviceName)
+                    }
                     ACAO_PERMISSAO -> {
                         val ok = i.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
                         Registro.anotar("cabo USB: permissão " + (if (ok) "dada" else "negada") + " para ${hex(d)}")
-                        if (ok) tratar(a, d, forcar = true)
+                        if (ok) tratar(a, d, PERMITIU)
                     }
                 }
             }
@@ -149,18 +185,54 @@ object CaboUsb {
         if (usarCabo(a)) procurarJaPlugado(a)
     }
 
-    /** Aparelho plugado (pelo aviso do Android ou pela CaboActivity). */
-    fun plugou(ctx: Context, d: UsbDevice) {
+    /** Aparelho plugado: pelo aviso do Android ([doSistema] = false) ou pela CaboActivity (true). */
+    fun plugou(ctx: Context, d: UsbDevice, doSistema: Boolean) {
         anotar("plugou", d)
-        if (usarCabo(ctx)) tratar(ctx, d)
+        if (usarCabo(ctx)) tratar(ctx, d, if (doSistema) SISTEMA else AVISO)
     }
 
     private fun procurarJaPlugado(ctx: Context) {
         val um = ctx.getSystemService(Context.USB_SERVICE) as UsbManager
-        um.deviceList.values.forEach { tratar(ctx, it) }
+        um.deviceList.values.forEach { tratar(ctx, it, PROCURA) }
     }
 
+    /**
+     * A conversa pelo cabo acabou. Se o aparelho continua plugado, abre de novo (o celular também reabre do lado dele).
+     * Se ele nunca respondeu, é outro app com o cabo (ou, na 1ª vez, o Leonardo ainda não tocou em OK no celular).
+     */
+    fun caboTerminou(ctx: Context, nome: String, respondeu: Boolean, durouMs: Long) {
+        if (!usarCabo(ctx)) return
+        val um = ctx.getSystemService(Context.USB_SERVICE) as UsbManager
+        if (um.deviceList.values.none { it.deviceName == nome }) return   // soltou: espera a próxima plugada
+        val espera: Long = synchronized(this) {
+            val curta = durouMs < 20_000
+            val n = (if (respondeu && !curta) 0 else tentativas[nome] ?: 0) + 1
+            tentativas[nome] = n
+            val primeiraVez = SystemClock.elapsedRealtime() - trocouEm < 90_000
+            if (!respondeu && (n > 4 || (!primeiraVez && n > 1))) {
+                alheios.add(nome)
+                aviso = "o celular não respondeu pelo cabo (o ZLink/Android Auto pegou o cabo?)"
+                Registro.anotar("cabo USB: $aviso Sigo pela rede Bluetooth até o cabo ser solto.")
+                return
+            }
+            when {
+                respondeu && !curta -> 1_000L                    // funcionava e caiu: volta já
+                respondeu -> minOf(30_000L, 2_000L * n)          // cai logo de novo: espera cada vez mais
+                else -> 3_000L * n                               // 1ª vez: o Leonardo ainda tocando em OK no celular
+            }
+        }
+        Rede.principal.postDelayed({
+            val d = um.deviceList.values.firstOrNull { it.deviceName == nome } ?: return@postDelayed
+            tratar(ctx, d, DE_NOVO)
+        }, espera)
+    }
+
+    /** O celular respondeu pelo cabo: some o aviso. */
+    fun caboRespondeu() { aviso = "" }
+
     private fun ehAcessorio(d: UsbDevice) = d.vendorId == GOOGLE && d.productId in PIDS_ACESSORIO
+
+    private fun temMtp(d: UsbDevice) = (0 until d.interfaceCount).any { d.getInterface(it).interfaceClass == UsbConstants.USB_CLASS_STILL_IMAGE }
 
     private fun pareceCelular(d: UsbDevice): Boolean {
         if (d.vendorId == XIAOMI) return true
@@ -173,21 +245,33 @@ object CaboUsb {
     }
 
     @Synchronized
-    private fun tratar(ctx: Context, d: UsbDevice, forcar: Boolean = false) {
+    private fun tratar(ctx: Context, d: UsbDevice, origem: Int) {
         if (!usarCabo(ctx)) return
         if (!ehAcessorio(d) && !pareceCelular(d)) return
+        if (d.deviceName in alheios) return
         val agora = SystemClock.elapsedRealtime()
-        if (!forcar && d.deviceName == ultimoTratado && agora - ultimoTratadoEm < 3000) return
-        ultimoTratado = d.deviceName; ultimoTratadoEm = agora
+        if (origem != PERMITIU && origem != DE_NOVO && d.deviceName == ultimoTratado && agora - ultimoTratadoEm < 3000) return
         val um = ctx.getSystemService(Context.USB_SERVICE) as UsbManager
+        // Conferência atrasada: o aparelho pode ter sido solto (ou trocado de modo) nesse meio tempo.
+        if ((origem == REVER || origem == REVER_TARDE || origem == DE_NOVO) && um.deviceList.values.none { it.deviceName == d.deviceName }) return
         if (!um.hasPermission(d)) {
-            // Mostra o "Permitir" do Android; quem toca é o Leonardo.
-            // MUTABLE: o Android preenche a resposta (aparelho + "permitido") neste aviso. Explícito (só para nós).
-            val pi = PendingIntent.getBroadcast(ctx, 7, Intent(ACAO_PERMISSAO).setPackage(ctx.packageName),
-                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            try { um.requestPermission(d, pi) } catch (e: Exception) { Registro.anotar("cabo USB: pedido de permissão falhou (${e.javaClass.simpleName})") }
+            when {
+                // Com o "usar por padrão" marcado, o Android dá a permissão e abre a CaboActivity logo depois deste
+                // aviso. Pedir agora mostraria o diálogo à toa: confere de novo em 1,5 s.
+                origem == AVISO || origem == SISTEMA -> Rede.principal.postDelayed({ tratar(ctx, d, REVER) }, 1_500)
+                // Sem padrão, o próprio Android já mostra "Abrir com Painel ASX?" (com "usar por padrão"/"Sempre").
+                // Não empilha o nosso diálogo em cima: só pede se, 15 s depois, ninguém respondeu ao dele. A exceção é
+                // o celular em modo "arquivos" (MTP): aí o Android só põe um aviso na barra e quem pergunta somos nós.
+                origem == REVER && !temMtp(d) -> Rede.principal.postDelayed({ tratar(ctx, d, REVER_TARDE) }, 15_000)
+                else -> pedirPermissao(ctx, um, d)
+            }
             return
         }
+        if (origem == REVER_TARDE) return   // já resolvido pelo "Abrir com" do Android (a CaboActivity tratou)
+        // Permissão sem pedir = o "usar por padrão" funciona: zera a contagem de pedidos.
+        if (origem != PERMITIU && CaboCelular.prefs(ctx).getInt("cabo_pedidos", 0) != 0)
+            CaboCelular.prefs(ctx).edit().putInt("cabo_pedidos", 0).apply()
+        ultimoTratado = d.deviceName; ultimoTratadoEm = agora
         Thread({
             try {
                 if (ehAcessorio(d)) {
@@ -197,12 +281,31 @@ object CaboUsb {
                         CaboCelular.entregarCabo(canal)
                     } else Registro.anotar("cabo USB: não abri o acessório (outro app, como o ZLink, pegou antes?)")
                 } else if (trocarParaAcessorio(um, d)) {
+                    trocouEm = SystemClock.elapsedRealtime()
                     Registro.anotar("cabo USB: pedi o modo acessório ao ${hex(d)}; ele vai voltar como 18d1:2d00")
                 }
             } catch (e: Exception) {
                 Registro.anotar("ERRO cabo USB: ${e.javaClass.simpleName}: ${e.message}")
             }
         }, "cabo-usb").start()
+    }
+
+    /** Mostra o "Permitir" do Android (quem toca é o Leonardo). Nunca mais de [MAX_PEDIDOS] vezes seguidas. */
+    private fun pedirPermissao(ctx: Context, um: UsbManager, d: UsbDevice) {
+        val p = CaboCelular.prefs(ctx)
+        val n = p.getInt("cabo_pedidos", 0)
+        if (n >= MAX_PEDIDOS) {
+            if (aviso.isEmpty() || !aviso.startsWith("sem permissão")) {
+                aviso = "sem permissão do cabo: desligue e ligue o interruptor do cabo e marque \"usar por padrão\""
+                Registro.anotar("cabo USB: $aviso (não pergunto mais sozinho)")
+            }
+            return
+        }
+        p.edit().putInt("cabo_pedidos", n + 1).apply()
+        // MUTABLE: o Android preenche a resposta (aparelho + "permitido") neste aviso. Explícito (só para nós).
+        val pi = PendingIntent.getBroadcast(ctx, 7, Intent(ACAO_PERMISSAO).setPackage(ctx.packageName),
+            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        try { um.requestPermission(d, pi) } catch (e: Exception) { Registro.anotar("cabo USB: pedido de permissão falhou (${e.javaClass.simpleName})") }
     }
 
     /** Celular normal -> modo acessório (AOA 51/52/53). */
@@ -294,12 +397,14 @@ object CaboUsb {
     fun diagnostico(ctx: Context): String {
         val sb = StringBuilder()
         val pm = ctx.packageManager
-        sb.append("interruptor: cabo do ").append(if (usarCabo(ctx)) "Painel ASX (fase 2)" else "Android Auto (padrão)").append('\n')
+        sb.append("interruptor: cabo do ").append(if (usarCabo(ctx)) "Painel ASX (padrão)" else "Android Auto").append('\n')
+        sb.append("pedidos de permissão seguidos: ").append(CaboCelular.prefs(ctx).getInt("cabo_pedidos", 0)).append(" de ").append(MAX_PEDIDOS)
+            .append(if (aviso.isNotEmpty()) " · aviso: $aviso" else "").append('\n')
         sb.append("filtro USB do Painel (alias): ").append(
             when (pm.getComponentEnabledSetting(ComponentName(ctx.packageName, ALIAS))) {
                 PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> "ligado"
                 PackageManager.COMPONENT_ENABLED_STATE_DISABLED -> "desligado"
-                else -> "padrão do manifesto (desligado)"
+                else -> "padrão do manifesto (desligado; o app liga na 1ª vez)"
             }).append('\n')
 
         // 1. A NWD desligou os diálogos de permissão USB? (true = caso B para todos os apps)
@@ -370,7 +475,7 @@ class CaboActivity : Activity() {
         val d = intent?.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
         if (d != null) {
             CaboCelular.iniciar(applicationContext)
-            CaboUsb.plugou(applicationContext, d)
+            CaboUsb.plugou(applicationContext, d, doSistema = true)
         }
         finish()
     }
