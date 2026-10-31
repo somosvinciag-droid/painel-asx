@@ -53,10 +53,14 @@ object Viagens {
         }
     }
 
+    /** Grava fora da linha principal (o GPS chega na linha principal) e sem cortar o arquivo se a energia cair. */
+    private val gravador = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "viagens").apply { isDaemon = true } }
+
     private fun salvar() {
-        try {
-            arquivo?.writeText(JSONArray(viagens.takeLast(MAX_VIAGENS)).toString())
-        } catch (_: Exception) {
+        val f = arquivo ?: return
+        val texto = try { JSONArray(viagens.takeLast(MAX_VIAGENS)).toString() } catch (_: Exception) { return }
+        gravador.execute {
+            try { Arquivo.gravarSeguro(f, texto) } catch (e: Exception) { Registro.anotar("ERRO viagens: não gravei (${e.javaClass.simpleName})") }
         }
     }
 
@@ -83,7 +87,8 @@ object Viagens {
         if (agora - ultimoSalvo > 30_000) {
             ultimoSalvo = agora
             try {
-                ultimoLocal?.writeText(ponto(l).put("hora", agora).toString())
+                val f = ultimoLocal; val texto = ponto(l).put("hora", agora).toString()
+                if (f != null) gravador.execute { try { Arquivo.gravarSeguro(f, texto) } catch (_: Exception) { } }
             } catch (_: Exception) {
             }
         }
