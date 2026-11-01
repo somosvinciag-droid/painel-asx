@@ -30,7 +30,36 @@ import java.util.Locale
 
 /** Abre a tela do carro (de qualquer lugar). */
 object Painel {
+    /**
+     * Decisão do Leonardo (01/11, depois da tela do Android Auto): a tela F3 foi APAGADA. Nada abre a TelaCarro;
+     * a central fica com a tela de fábrica e, com o cabo, o Android Auto. O FALAR do Jarvis passa a abrir a tela do app.
+     * Para trazer a F3 de volta: true (e o filtro HOME no manifesto).
+     */
+    const val F3_LIGADA = false
+
+    /** Na 1ª vez sem a F3: devolve a tela inicial à de fábrica (se o Painel tinha virado a tela inicial da NWD). */
+    fun devolverTelaInicial(ctx: Context) {
+        if (F3_LIGADA) return
+        val p = ctx.getSharedPreferences("painel", Context.MODE_PRIVATE)
+        if (p.getBoolean("f3_apagada", false)) return
+        p.edit().putBoolean("f3_apagada", true).apply()
+        try {
+            if (Nwd.somosTelaInicial(ctx)) {
+                Nwd.pedirProp(ctx, Nwd.PROP_LAUNCHER, Nwd.LAUNCHER_FABRICA)
+                Registro.anotar("tela do carro: apagada; pedi a tela inicial de fábrica de volta")
+            } else Registro.anotar("tela do carro: apagada (a tela inicial já era a de fábrica)")
+        } catch (e: Exception) { Registro.anotar("tela do carro: não devolvi a tela inicial (${e.javaClass.simpleName})") }
+    }
+
     fun abrir(ctx: Context, ouvir: Boolean = false) {
+        if (!F3_LIGADA) {
+            // Sem a F3: só o FALAR continua (pela tela do app).
+            if (ouvir) try {
+                ctx.startActivity(Intent(ctx, MainActivity::class.java).setAction(MainActivity.ACAO_OUVIR)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+            } catch (_: Exception) { }
+            return
+        }
         try {
             val i = Intent(ctx, TelaCarro::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
             if (ouvir) i.action = MainActivity.ACAO_OUVIR
@@ -98,6 +127,11 @@ class TelaCarro : Activity() {
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
+        if (!Painel.F3_LIGADA) {
+            Apps.abrir(this, Nwd.LAUNCHER_FABRICA)
+            finish()
+            return
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_STABLE

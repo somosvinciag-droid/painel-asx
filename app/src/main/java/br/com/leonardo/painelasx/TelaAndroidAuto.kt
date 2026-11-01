@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit
 /**
  * A tela do Android Auto (decisão do Leonardo, 01/11): o vídeo que o celular manda pelo cabo é decodificado
  * (H.264 pelo MediaCodec, direto na superfície, sem passar pelo processador) e os toques voltam para o celular.
- * Abre sozinha quando o Android Auto liga. "PAINEL" (canto) ou o "sair" do próprio Android Auto voltam para a TelaCarro.
+ * Abre sozinha quando o Android Auto liga. O "sair" do próprio Android Auto fecha (fica a tela de fábrica por baixo).
  */
 class TelaAndroidAuto : Activity(), SurfaceHolder.Callback {
 
@@ -59,16 +59,18 @@ class TelaAndroidAuto : Activity(), SurfaceHolder.Callback {
         val sv = SurfaceView(this)
         sv.holder.addCallback(this)
         raiz.addView(sv, FrameLayout.LayoutParams(-1, -1))
-        // Botão discreto para voltar à tela do Painel (o Android Auto continua ligado: som, música, navegação).
-        val painel = TextView(this).apply {
-            text = "PAINEL"
-            textSize = 13f
-            setTextColor(Color.WHITE)
-            setBackgroundColor(0x99000000.toInt())
-            setPadding(22, 10, 22, 10)
-            setOnClickListener { voltarAoPainel() }
+        // Botão discreto para voltar à tela do Painel (só se a F3 existir; o Leonardo a apagou em 01/11).
+        if (Painel.F3_LIGADA) {
+            val painel = TextView(this).apply {
+                text = "PAINEL"
+                textSize = 13f
+                setTextColor(Color.WHITE)
+                setBackgroundColor(0x99000000.toInt())
+                setPadding(22, 10, 22, 10)
+                setOnClickListener { voltarAoPainel() }
+            }
+            raiz.addView(painel, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END))
         }
-        raiz.addView(painel, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END))
         superficie = sv
         setContentView(raiz)
         aberta = this

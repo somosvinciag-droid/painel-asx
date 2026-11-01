@@ -34,6 +34,8 @@ class App : Application() {
         // Mede quanto tempo a linha principal fica ocupada com a inicialização (para conferir na central).
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             Registro.anotar("inicio: linha principal livre ${android.os.SystemClock.elapsedRealtime() - inicio} ms")
+            // Tela F3 apagada (01/11): devolve a tela inicial à de fábrica, uma vez.
+            try { Painel.devolverTelaInicial(this) } catch (_: Throwable) { }
         }
     }
 }

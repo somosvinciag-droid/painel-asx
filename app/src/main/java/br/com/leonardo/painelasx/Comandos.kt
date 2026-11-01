@@ -224,6 +224,7 @@ object Comandos {
 
         // Telas e outros
         if (t == "tela do carro" || t.startsWith("abre a tela do carro") || t == "painel do carro" || t == "tela vermelha") {
+            if (!Painel.F3_LIGADA) return "A tela do carro foi desligada. Com o celular no cabo, use o Android Auto."
             Painel.abrir(ctx); return "Tela do carro."
         }
         if (t == "backup" || t.startsWith("faz o backup") || t.startsWith("fazer backup")) {

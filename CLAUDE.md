@@ -391,3 +391,19 @@ Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica
 - Volume/latência do som pelo `AudioTrack` nesta central; convivência do foco de áudio com o Jarvis e o ouvido.
 - Se o volante (MediaSession) chega ao celular e se o Google Maps manda a navegação nova (0x8006/0x8007) ou a antiga.
 - Se o "Ok Google" do celular funciona com a central dizendo "moto".
+
+## v30–v32 (01/11): Android Auto na tela e F3 apagada
+- Teste 01/11 09:09: com o foco de vídeo NATIVO o Android Auto do celular desiste em ~9 s ("erro de comunicação 7").
+  v30: foco PROJETADO. O ZLink perdeu a corrida (AA ligou 2,2 s depois de plugar) e o Spotify tocou pelo cabo.
+- Pista das quedas: mandar áudio (ditado do app Claude) com o Bluetooth ligado na central abre "ligação" HFP
+  (`com.bt.ACTION_BT_BEGIN_CALL_ONLINE`) e o AA caiu ~4 s depois. Testar sem mandar áudio.
+- O cabo com o AA não leva internet: a central usa o roteador Wi-Fi (ou ancoragem Bluetooth) do celular.
+- DECISÃO do Leonardo (01/11 10:15): o Painel MOSTRA a tela do Android Auto (substitui o "sem espelhamento" para o AA).
+  v31: `TelaAndroidAuto` (MediaCodec H.264 direto na SurfaceView, fila própria `aa-video`, toques -> `Aa.toque`,
+  conferido com o protobuf oficial). Abre sozinha quando o AA liga. Vídeo 1280x720 (densidade 213) se a tela tiver
+  >= 1280 px, senão 800x480 (160): o AA precisa de >= 748x450 dp (Open Headunit #1101). `AaSessao.ligarVideo`/`pedirImagem`
+  (solta e pega o foco = quadro-chave). "Sair" do AA (foco nativo pedido) fecha a tela.
+- DECISÃO do Leonardo (01/11 10:29): APAGAR a F3 de vez. v32: `Painel.F3_LIGADA = false` (nada abre a TelaCarro; se algo
+  abrir, ela manda para a tela de fábrica), filtro HOME tirado, tela inicial devolvida à de fábrica uma vez
+  (`Painel.devolverTelaInicial`). O FALAR (`Painel.abrir(ouvir = true)`) abre a MainActivity. Sem botão PAINEL no AA.
+- Próximo (depois de o AA funcionar direito): personalizar.
