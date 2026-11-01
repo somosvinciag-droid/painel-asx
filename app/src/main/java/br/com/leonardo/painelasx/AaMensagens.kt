@@ -149,8 +149,15 @@ object Aa {
         val marcaCentral: String = "Painel ASX",
         val modeloCentral: String = "K4811",
         val versao: String = "1",
-        val nome: String = "Painel ASX"
-    )
+        val nome: String = "Painel ASX",
+        /** Tela da central com 1280 px ou mais: vídeo 1280x720 (senão 800x480). */
+        val video720: Boolean = false
+    ) {
+        val larguraVideo get() = if (video720) 1280 else 800
+        val alturaVideo get() = if (video720) 720 else 480
+        /** O Android Auto precisa de pelo menos 748x450 dp, senão desenha a versão reduzida (Open Headunit #1101). */
+        val densidade get() = if (video720) 213 else 160
+    }
 
     private fun audio(id: Int, tipoAudio: Int, hz: Int, canais: Int) = ProtoEscritor()
         .int(1, id)
@@ -173,15 +180,15 @@ object Aa {
             msg(1) { int(1, SENSOR_DIRIGINDO) }
             msg(1) { int(1, SENSOR_NOITE) }
         })
-        // vídeo (obrigatório; não é mostrado)
+        // vídeo: a tela do Android Auto (TelaAndroidAuto)
         m.msg(1, ProtoEscritor().int(1, CANAL_VIDEO).msg(3) {
             int(1, 3)       // H.264
             int(2, 0)       // sem áudio
             msg(4) {
-                int(1, 1)   // 800x480
+                int(1, if (c.video720) 2 else 1)   // 1280x720 ou 800x480
                 int(2, 2)   // 30 quadros
                 int(3, 0); int(4, 0)
-                int(5, 160) // densidade
+                int(5, c.densidade)
                 int(10, 3)  // H.264
             }
             bool(5, true)
@@ -189,7 +196,7 @@ object Aa {
         // entrada: só as teclas de música (+ tela de toque do tamanho do vídeo, que o celular exige)
         m.msg(1, ProtoEscritor().int(1, CANAL_ENTRADA).msg(4) {
             for (t in TECLAS) int(1, t)
-            msg(2) { int(1, 800); int(2, 480) }
+            msg(2) { int(1, c.larguraVideo); int(2, c.alturaVideo) }
         })
         m.msg(1, audio(CANAL_SISTEMA, 2, 16000, 1))
         m.msg(1, audio(CANAL_VOZ, 1, 16000, 1))
@@ -229,6 +236,20 @@ object Aa {
     fun micResposta(status: Int, sessao: Int) = ProtoEscritor().int(1, status).int(2, sessao).paraBytes()
     fun sensorDirigindo(status: Int = 0) = ProtoEscritor().msg(13) { int(1, status) }.paraBytes()
     fun sensorNoite(noite: Boolean) = ProtoEscritor().msg(10) { bool(1, noite) }.paraBytes()
+
+    /**
+     * Toque na tela do Android Auto. [pontos] = x, y, id de cada dedo (já na escala do vídeo).
+     * [acao]: 0 encostou, 1 soltou, 2 arrastou, 3 cancelou, 5 outro dedo encostou, 6 outro dedo soltou.
+     */
+    fun toque(tsNs: Long, acao: Int, indice: Int, pontos: IntArray) = ProtoEscritor()
+        .varint(1, tsNs)
+        .msg(3) {
+            var i = 0
+            while (i + 2 < pontos.size) { msg(1) { int(1, pontos[i]); int(2, pontos[i + 1]); int(3, pontos[i + 2]) }; i += 3 }
+            int(2, indice)
+            int(3, acao)
+        }
+        .paraBytes()
 
     /** Tecla apertada/solta no canal de entrada. [tsNs] em nanossegundos. */
     fun tecla(tsNs: Long, codigo: Int, apertada: Boolean) = ProtoEscritor()

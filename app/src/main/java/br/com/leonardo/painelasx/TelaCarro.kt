@@ -305,7 +305,11 @@ class TelaCarro : Activity() {
                 orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL
                 setPadding(if (i == 0) px(4) else px(20), 0, px(8), 0)
                 isClickable = true
-                setOnClickListener { if (cmd.isEmpty()) TodosApps.abrir(this@TelaCarro) else executar(cmd) }
+                setOnClickListener {
+                    // Com o Android Auto ligado pelo cabo, "Apps" abre a tela dele (os apps do celular).
+                    if (cmd.isEmpty()) { if (!AndroidAuto.abrirTela(this@TelaCarro)) TodosApps.abrir(this@TelaCarro) }
+                    else executar(cmd)
+                }
             }
             d.addView(texto(nome, 28f, TEXTO, forte))
             d.addView(texto(sub, 14f, CINZA), lp(WRAP, WRAP).apply { topMargin = px(4) })

@@ -25,8 +25,8 @@ import javax.net.ssl.SSLContext
 /**
  * "ZLink nosso": o Painel ASX como receptor de Android Auto pelo cabo (modo do cabo "Android Auto pelo Painel").
  *
- *  - A tela continua a do Painel (TelaCarro): o foco de vídeo é "projetado" (senão o celular desiste, erro 7), mas o vídeo
- *    é confirmado e jogado fora: nada é decodificado nem mostrado.
+ *  - Tela do Android Auto (TelaAndroidAuto, decisão do Leonardo 01/11): abre quando liga; "PAINEL" volta para a TelaCarro.
+ *    Sem a tela aberta, o vídeo é confirmado e jogado fora (o foco continua "projetado": nativo = o celular desiste, erro 7).
  *  - Som pelo cabo: música e voz do GPS no alto-falante do carro ([AaSom]).
  *  - Música (título, artista, capa, tempo) e próxima curva aparecem na TelaCarro; os botões mandam teclas.
  *  - Microfone: a central NÃO anuncia microfone e se diz "moto" -> o "Ok Google" do celular usa o microfone
@@ -108,7 +108,9 @@ object AndroidAuto {
             sm = AaSom(ctx) { tecla(Aa.TECLA_PAUSA) }
             val versao = try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "1" } catch (_: Exception) { "1" }
             val evs = Eventos(ctx, sm)
-            s = AaSessao(TransporteCabo(canal), ctxTls, Aa.Carro(versao = versao), evs)
+            val carro = Aa.Carro(versao = versao, video720 = telaGrande(ctx))
+            tamanho = carro.larguraVideo to carro.alturaVideo
+            s = AaSessao(TransporteCabo(canal), ctxTls, carro, evs)
             evs.dona = s
             synchronized(this) {
                 som = sm
@@ -142,11 +144,36 @@ object AndroidAuto {
         }
         if (!eraAtual) return   // outra conversa assumiu o cabo: ela cuida de reabrir
         Rede.naTela { soltarMidia() }
+        TelaAndroidAuto.fechar()
         // Cabo ainda plugado (o celular fechou, a central dormiu...): abre de novo. Nunca respondeu = outro app.
         try {
             CaboUsb.caboTerminou(ctx, canal.nomeAparelho, s?.respondeu == true, SystemClock.elapsedRealtime() - inicio,
                 semTls = s != null && s.respondeu && !s.tlsOk)
         } catch (_: Throwable) { }
+    }
+
+    /** Tamanho do vídeo combinado com o celular (a TelaAndroidAuto converte os toques para ele). */
+    @Volatile private var tamanho = 800 to 480
+    fun tamanhoVideo() = tamanho
+
+    /** Tela da central com 1280 px ou mais de largura: vídeo 1280x720. */
+    private fun telaGrande(ctx: Context): Boolean = try {
+        val dm = android.util.DisplayMetrics()
+        @Suppress("DEPRECATION")
+        (ctx.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).defaultDisplay.getRealMetrics(dm)
+        maxOf(dm.widthPixels, dm.heightPixels) >= 1280
+    } catch (_: Throwable) { false }
+
+    fun ligarVideo(v: AaVideoSaida) { try { sessao?.ligarVideo(v) } catch (_: Throwable) { } }
+    fun desligarVideo(v: AaVideoSaida) { try { sessao?.let { if (it.video === v) it.ligarVideo(null) } } catch (_: Throwable) { } }
+    fun pedirImagem() { try { sessao?.pedirImagem() } catch (_: Throwable) { } }
+    fun toque(acao: Int, indice: Int, pontos: IntArray) { try { sessao?.toque(acao, indice, pontos) } catch (_: Throwable) { } }
+
+    /** Abre a tela do Android Auto (comando de voz, botão). false = o Android Auto não está ligado. */
+    fun abrirTela(ctx: Context): Boolean {
+        if (!ligado) return false
+        TelaAndroidAuto.abrir(ctx)
+        return true
     }
 
     private fun limparEstado() {
@@ -180,6 +207,8 @@ object AndroidAuto {
             if (e == "canais") ligado = true
             if (e == "canais") Rede.naTela { criarMidia(ctx) }
             if (e == "canais") try { CaboUsb.androidAutoLigou() } catch (_: Throwable) { }
+            // Como num carro de fábrica: ligou o Android Auto, a tela dele abre.
+            if (e == "canais") TelaAndroidAuto.abrir(ctx)
             // O celular não responde ao TLS: bloqueado ou pedindo para aceitar o carro novo (1ª vez).
             if (e == AaSessao.ETAPA_TLS_ESPERANDO) try { CaboUsb.esperandoCelular() } catch (_: Throwable) { }
         }
@@ -213,6 +242,12 @@ object AndroidAuto {
             fraseEm = SystemClock.elapsedRealtime()
             if (ativa != navegando) Registro.anotar("aa: navegação " + if (ativa) "ligada" else "desligada")
             navegando = ativa
+        }
+
+        override fun videoNativo() {
+            if (!atual) return
+            Registro.anotar("aa: o motorista saiu do Android Auto (volta a tela do Painel)")
+            TelaAndroidAuto.fechar()
         }
 
         override fun vozSessao(ativa: Boolean) {
