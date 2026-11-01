@@ -70,12 +70,7 @@
             android:stateNotNeeded="true"
             android:taskAffinity="br.com.leonardo.painelasx.carro"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
-            <!-- Pode ser a tela inicial da central: o Android a abre sempre que a central liga ou acorda. -->
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.HOME" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
+            <!-- F3 apagada pelo Leonardo (01/11): deixou de ser tela inicial (o filtro HOME saiu). -->
         </activity>
 
         <!-- Tela do Android Auto do celular (vídeo pelo cabo + toques). -->
