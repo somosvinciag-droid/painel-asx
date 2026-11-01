@@ -122,7 +122,7 @@ object AndroidAuto {
             noiteAgora(s)
             val motivo = s.rodar()
             ultimoFim = motivo
-            Registro.anotar("aa: desligou ($motivo)")
+            Registro.anotar("aa: desligou ($motivo) depois de ${(SystemClock.elapsedRealtime() - inicio) / 100 / 10.0} s · cabo: ${canal.resumo()}")
         } catch (t: Throwable) {
             Registro.anotar("ERRO aa: ${t.javaClass.simpleName}: ${t.message?.take(100)}")
         }
@@ -142,7 +142,10 @@ object AndroidAuto {
         if (!eraAtual) return   // outra conversa assumiu o cabo: ela cuida de reabrir
         Rede.naTela { soltarMidia() }
         // Cabo ainda plugado (o celular fechou, a central dormiu...): abre de novo. Nunca respondeu = outro app.
-        try { CaboUsb.caboTerminou(ctx, canal.nomeAparelho, s?.respondeu == true, SystemClock.elapsedRealtime() - inicio) } catch (_: Throwable) { }
+        try {
+            CaboUsb.caboTerminou(ctx, canal.nomeAparelho, s?.respondeu == true, SystemClock.elapsedRealtime() - inicio,
+                semTls = s != null && s.respondeu && !s.tlsOk)
+        } catch (_: Throwable) { }
     }
 
     private fun limparEstado() {
@@ -175,6 +178,9 @@ object AndroidAuto {
             etapa = e
             if (e == "canais") ligado = true
             if (e == "canais") Rede.naTela { criarMidia(ctx) }
+            if (e == "canais") try { CaboUsb.androidAutoLigou() } catch (_: Throwable) { }
+            // O celular não responde ao TLS: bloqueado ou pedindo para aceitar o carro novo (1ª vez).
+            if (e == AaSessao.ETAPA_TLS_ESPERANDO) try { CaboUsb.esperandoCelular() } catch (_: Throwable) { }
         }
         override fun registro(linha: String) = Registro.anotar(linha)
         override fun audioInicio(canal: Int, hz: Int, canais: Int) = som.inicio(canal, hz, canais)
@@ -283,7 +289,8 @@ object AndroidAuto {
     fun resumo(): String = when {
         ligado -> "Android Auto ligado pelo cabo" + (if (appTocando.isNotBlank()) " · $appTocando" else "") + (if (navegando) " · navegando" else "")
         sessao != null -> "Android Auto: $etapa"
-        else -> "Android Auto desligado" + if (ultimoFim.isNotEmpty()) " (último: $ultimoFim)" else ""
+        else -> "Android Auto desligado" + (if (ultimoFim.isNotEmpty()) " (último: $ultimoFim)" else "") +
+            CaboUsb.aviso.let { if (it.isNotEmpty()) " · $it" else "" }
     }
 
     fun diagnostico(): String = buildString {

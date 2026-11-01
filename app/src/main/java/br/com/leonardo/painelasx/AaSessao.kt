@@ -63,12 +63,19 @@ class AaSessao(
     private val limiteVersaoMs: Long = 10_000,
     private val limiteTlsMs: Long = 15_000,
     private val pingCadaMs: Long = 5_000,
-    private val quedaMs: Long = 30_000
+    private val quedaMs: Long = 30_000,
+    /** TLS sem NENHUMA resposta do celular (bloqueado / esperando aceitar o carro novo): espera até isto. */
+    private val limiteTlsCaladoMs: Long = 60_000,
+    /** Depois disto sem resposta ao TLS, a etapa [ETAPA_TLS_ESPERANDO] é avisada (uma vez). */
+    private val avisoCaladoMs: Long = 4_000
 ) {
     @Volatile var etapa = "começando"
         private set
     /** O celular respondeu à versão (é o Android Auto mesmo, e não outro app com o cabo). */
     @Volatile var respondeu = false
+        private set
+    /** O TLS terminou (a central já mandou a autenticação). */
+    @Volatile var tlsOk = false
         private set
     /** Canais abertos e serviços combinados: o Android Auto está ligado. */
     @Volatile var conectado = false
@@ -95,9 +102,11 @@ class AaSessao(
 
     private class Saida(val canal: Int, val flags: Int, val texto: ByteArray)
 
-    private companion object {
+    companion object {
         /** Saída que já é um registro TLS cifrado (controle do TLS), mandada como está no canal 0. */
-        const val CONTROLE_TLS = -2
+        private const val CONTROLE_TLS = -2
+        /** Etapa avisada quando o celular não responde ao TLS (a central mostra "desbloqueie e aceite"). */
+        const val ETAPA_TLS_ESPERANDO = "tls: esperando o celular (desbloquear e aceitar o Android Auto?)"
     }
 
     // ------------------------------------------------------------------ comandos de fora
@@ -160,6 +169,7 @@ class AaSessao(
             if (!versao()) { encerrar(if (motivoFim.isEmpty()) "o celular não respondeu à versão" else motivoFim); return motivoFim }
             if (!tls()) { encerrar(if (motivoFim.isEmpty()) "TLS falhou" else motivoFim); return motivoFim }
             if (!t.escrever(Aa.autenticou())) { encerrar("não consegui mandar a autenticação"); return motivoFim }
+            tlsOk = true
             mudarEtapa("tls ok")
             ultimoRecebido = agora()
             Thread({ escrever() }, "aa-escrever").apply { isDaemon = true }.start()
@@ -258,14 +268,28 @@ class AaSessao(
         return ok
     }
 
+    /**
+     * TLS (central = cliente). Se o celular não manda NADA de volta ao primeiro "olá" do TLS, ele quase sempre está
+     * esperando o dono (celular bloqueado ou "aceitar o carro novo" no Android Auto, na 1ª vez): a espera vai até
+     * [limiteTlsCaladoMs] e a etapa "tls: esperando o celular" é avisada depois de [avisoCaladoMs] (a central mostra
+     * o aviso). Depois que o celular começa a responder, o limite volta a ser [limiteTlsMs].
+     */
     private fun tlsPassos(): Boolean {
         mudarEtapa("tls: começando")
         val m = AaMotorTls(tlsCtx)
         motor = m
         m.comecar()
-        val prazo = agora() + limiteTlsMs
+        val inicio = agora()
+        var primeiroEm = 0L
+        var avisou = false
+        fun prazo() = if (primeiroEm == 0L) inicio + maxOf(limiteTlsMs, limiteTlsCaladoMs) else maxOf(inicio + limiteTlsMs, primeiroEm + limiteTlsMs)
         while (!m.terminouHandshake()) {
-            if (agora() > prazo) { motivoFim = "TLS demorou demais"; return false }
+            val p = prazo()
+            if (agora() > p) {
+                motivoFim = if (primeiroEm == 0L) "TLS: o celular não respondeu em ${(agora() - inicio) / 1000} s (bloqueado ou esperando aceitar o Android Auto?)"
+                    else "TLS demorou demais"
+                return false
+            }
             if (m.precisaEnviar()) {
                 val out = m.handshakeSaida()
                 if (out.isNotEmpty() && !t.escrever(AaQuadro.aberto(Aa.TLS, out))) { motivoFim = "TLS: o cabo não aceitou"; return false }
@@ -277,11 +301,24 @@ class AaSessao(
                 m.handshakeEntrada(ByteArray(0), 0, 0)
                 if (m.sobra() != antes || m.precisaEnviar() || m.terminouHandshake()) continue
             }
-            val q = try { quadroAberto(prazo, pularCifrados = false) } catch (e: java.io.IOException) { motivoFim = "TLS: ${e.message}"; return false }
-                ?: run { if (motivoFim.isEmpty()) motivoFim = "TLS: o celular parou de responder"; return false }
+            val espera = if (!avisou && primeiroEm == 0L) minOf(p, inicio + avisoCaladoMs) else p
+            val q = try { quadroAberto(espera, pularCifrados = false) } catch (e: java.io.IOException) { motivoFim = "TLS: ${e.message}"; return false }
+            if (q == null) {
+                if (motivoFim.isNotEmpty()) return false
+                if (primeiroEm != 0L && agora() >= p) { motivoFim = "TLS: o celular parou de responder"; return false }
+                if (!avisou && primeiroEm == 0L && agora() >= inicio + avisoCaladoMs) {
+                    avisou = true
+                    mudarEtapa(ETAPA_TLS_ESPERANDO)
+                }
+                continue
+            }
             val tipo = tipoDe(q)
             if (q[0].toInt() == 0 && tipo == Aa.VERSAO_RESPOSTA) continue   // resposta atrasada de um pedido repetido
             if (q[0].toInt() != 0 || tipo != Aa.TLS) { motivoFim = "TLS: mensagem inesperada (tipo $tipo)"; return false }
+            if (primeiroEm == 0L) {
+                primeiroEm = agora()
+                ev.registro("aa: tls: o celular respondeu ao TLS em ${primeiroEm - inicio} ms (${q.size - 6} bytes)" + if (avisou) " depois de esperar" else "")
+            }
             tlsRecebidos += q.size - 6
             m.handshakeEntrada(q, 6, q.size - 6)
         }

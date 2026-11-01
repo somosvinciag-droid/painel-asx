@@ -18,6 +18,9 @@ import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.Process
 import android.os.SystemClock
 import org.xmlpull.v1.XmlPullParser
 import java.io.IOException
@@ -35,6 +38,13 @@ class CanalAoa(
 ) : Canal {
     override val tipo = "cabo"
     @Volatile private var fechado = false
+    /** Para o registro: bytes lidos, leituras que deram erro NA HORA (sinal de outro app com a interface) e escritas recusadas. */
+    @Volatile var bytesLidos = 0L
+        private set
+    @Volatile var errosNaHora = 0
+        private set
+    @Volatile var escritasRecusadas = 0
+        private set
 
     // bulkTransfer devolve negativo tanto para "nada chegou" quanto para erro: a queda é vista pelo
     // aviso USB_DEVICE_DETACHED ou pela falta de resposta ao ping.
@@ -69,10 +79,13 @@ class CanalAoa(
         val t0 = SystemClock.elapsedRealtime()
         val r = try { con.bulkTransfer(entrada, buf, minOf(n, 16384), esperaMs.coerceAtLeast(1)) } catch (_: Exception) { -1 }
         if (fechado) return -1
-        if (r > 0) return r
+        if (r > 0) { bytesLidos += r; return r }
         // -1 na hora (sem esperar o tempo) = erro do USB, não "nada chegou": um respiro para não rodar em falso
         // até o aviso de "cabo solto" chegar.
-        if (r < 0 && SystemClock.elapsedRealtime() - t0 < esperaMs / 2) try { Thread.sleep(50) } catch (_: InterruptedException) { }
+        if (r < 0 && SystemClock.elapsedRealtime() - t0 < esperaMs / 2) {
+            errosNaHora++
+            try { Thread.sleep(50) } catch (_: InterruptedException) { }
+        }
         return 0
     }
 
@@ -87,10 +100,13 @@ class CanalAoa(
             if (fechado) return false
             val r = try { con.bulkTransfer(saida, b, pos, minOf(16384, b.size - pos), 1000) } catch (_: Exception) { -1 }
             if (r > 0) { pos += r; continue }
-            if (SystemClock.elapsedRealtime() > limite) return false
+            if (SystemClock.elapsedRealtime() > limite) { escritasRecusadas++; return false }
         }
         return true
     }
+
+    /** Uma linha para o registro quando a conversa acaba (ajuda a saber se outro app mexeu no cabo). */
+    fun resumo() = "lidos $bytesLidos bytes, $errosNaHora leituras com erro na hora, $escritasRecusadas escritas recusadas"
 
     override fun fechar() {
         if (fechado) return
@@ -112,6 +128,18 @@ class CanalAoa(
  *  - Nunca pergunta a permissão sem parar: no máximo [MAX_PEDIDOS] vezes seguidas sem o "usar por padrão" funcionar.
  *  - O celular no modo acessório que não responde (outro app, como o ZLink, pegou o cabo) é largado até o cabo ser solto.
  *  - Diagnóstico (só leitura) para saber se o ZLink pega o cabo com permissão automática (caso B) ou não (caso A).
+ *
+ * Briga com o ZLink (31/10, caso B confirmado: `config_disableUsbPermissionDialogs` = true, todo app tem permissão USB):
+ *  - O ZLINK5 (app de sistema, sem filtro USB no manifesto, aviso registrado em tempo de execução) manda o celular para
+ *    o modo acessório DELE em ~1 s e, enquanto o app dele não responde, repete o pedido (o celular volta como 2d00 a cada
+ *    1–2 s). Depois de ~10 s ele desiste daquele celular.
+ *  - Por isso: (1) o aviso USB é tratado numa linha própria de alta prioridade (não na linha da tela) e o pedido do
+ *    Android Auto sai na hora; (2) cada 2d00 que aparece SEM pedido nosso nos últimos [JANELA_NOSSO_MS] é "de outro" e
+ *    recebe de novo o pedido do Android Auto (o modo acessório aceita um pedido novo); (3) tudo isso dentro de uma
+ *    "plugada" (episódio, de plugar até o cabo ficar [FIM_EPISODIO_MS] sem celular) com no máximo [MAX_TROCAS] pedidos
+ *    nossos e espera crescente; passou disso, desiste até o cabo ser solto, com aviso e registro (nada de laço infinito).
+ *  - Os avisos do ZLink (ação "com.zjinnova.zlink", extra "status") vão para o registro: mostram quando ele achou o
+ *    celular e quando desistiu.
  */
 object CaboUsb {
     private const val GOOGLE = 0x18D1
@@ -133,6 +161,13 @@ object CaboUsb {
 
     /** Quedas rápidas seguidas (com resposta) antes de largar o cabo até ele ser solto. */
     private const val MAX_QUEDAS = 8
+    /** Pedidos de modo acessório (identidade do Android Auto) por plugada, contando a briga com o ZLink. */
+    private const val MAX_TROCAS = 8
+    /** Um 2d00 que aparece até este tempo depois de um pedido NOSSO é nosso; depois disso, é de outro app. */
+    private const val JANELA_NOSSO_MS = 4_000L
+    /** Sem nenhum celular no cabo por este tempo = a plugada acabou (zera a briga). */
+    private const val FIM_EPISODIO_MS = 6_000L
+    private const val ACAO_ZLINK = "com.zjinnova.zlink"
 
     // Modo "app do celular": os mesmos textos do accessory_filter.xml do app do celular (fabricante + modelo).
     private val TEXTOS = arrayOf(
@@ -165,6 +200,37 @@ object CaboUsb {
     @Volatile var aviso = ""
         private set
 
+    /** Linha própria para o cabo: o aviso do Android chega aqui (não na linha da tela, que pode estar ocupada). */
+    private val linha: Handler by lazy {
+        val h = HandlerThread("cabo-rapido").apply { start() }
+        Handler(h.looper).also { hd -> hd.post { try { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY) } catch (_: Throwable) { } } }
+    }
+
+    /** Uma plugada do celular (do primeiro aviso até o cabo ficar [FIM_EPISODIO_MS] sem celular). */
+    private class Plugada {
+        val inicio = SystemClock.elapsedRealtime()
+        /** Pedidos de modo acessório que ESTE app mandou (com sucesso) desde o começo ou desde o último Android Auto ligado. */
+        var trocas = 0
+        /** Todos os pedidos nossos nesta plugada (para o registro). */
+        var total = 0
+        /** Vezes em que o celular voltou como acessório SEM pedido nosso (outro app trocou). */
+        var alheias = 0
+        /** Quando o último pedido nosso saiu (0 = nenhum). */
+        var nossoEm = 0L
+        /** O celular apareceu fora do modo acessório nesta plugada (um 2d00 depois disso veio de um pedido de alguém). */
+        var viuNormal = false
+        var desistiu = false
+        var avisouDesbloquear = false
+        var ligou = false
+        val zlink = ArrayList<String>()
+    }
+    @Volatile private var plugada: Plugada? = null
+    /** Hora em que o aviso de cada aparelho chegou (para medir a corrida com o ZLink). */
+    private val avisoEm = HashMap<String, Long>()
+    private val zlinkVistos = ArrayDeque<String>()
+    /** Acessórios (nome do aparelho) que devem receber de novo o pedido do Android Auto em vez de serem abertos. */
+    private val trocarDeNovo = HashSet<String>()
+
     /**
      * Modo do cabo. Padrão: "Android Auto pelo Painel". Quem tinha desligado o interruptor antigo ("cabo_painel"
      * = false, o cabo era do Android Auto/ZLink) continua com o ZLink.
@@ -191,7 +257,7 @@ object CaboUsb {
         if (antes == MODO_AA && m != MODO_AA) AndroidAuto.parar("modo do cabo mudou")
         val painel = m != MODO_ZLINK
         aviso = ""
-        synchronized(this) { alheios.clear(); tentativas.clear() }
+        synchronized(this) { alheios.clear(); tentativas.clear(); trocarDeNovo.clear(); plugada = null }
         try {
             ctx.packageManager.setComponentEnabledSetting(
                 ComponentName(ctx.packageName, ALIAS),
@@ -226,19 +292,19 @@ object CaboUsb {
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
             addAction(ACAO_PERMISSAO)
+            // O aviso USB não é "em fila", mas a lista de quem recebe sai em ordem de prioridade: ficamos entre os primeiros.
+            priority = 999
         }
         val r = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
                 @Suppress("DEPRECATION")
                 val d = i.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE) ?: return
                 when (i.action) {
-                    UsbManager.ACTION_USB_DEVICE_ATTACHED -> plugou(a, d, doSistema = false)
-                    UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                        anotar("soltou", d)
-                        synchronized(this@CaboUsb) { alheios.remove(d.deviceName); tentativas.remove(d.deviceName) }
-                        CaboCelular.soltouCabo(d.deviceName)
-                        AndroidAuto.soltouCabo(d.deviceName)
+                    UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
+                        synchronized(this@CaboUsb) { avisoEm[d.deviceName] = SystemClock.elapsedRealtime() }
+                        plugou(a, d, doSistema = false)
                     }
+                    UsbManager.ACTION_USB_DEVICE_DETACHED -> soltou(a, d)
                     ACAO_PERMISSAO -> {
                         val ok = i.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
                         Registro.anotar("cabo USB: permissão " + (if (ok) "dada" else "negada") + " para ${hex(d)}")
@@ -247,14 +313,123 @@ object CaboUsb {
                 }
             }
         }
-        if (Build.VERSION.SDK_INT >= 33) a.registerReceiver(r, f, Context.RECEIVER_EXPORTED) else a.registerReceiver(r, f)
+        // Na linha "cabo-rapido": o pedido do Android Auto sai sem esperar a linha da tela (corrida com o ZLink).
+        if (Build.VERSION.SDK_INT >= 33) a.registerReceiver(r, f, null, linha, Context.RECEIVER_EXPORTED) else a.registerReceiver(r, f, null, linha)
+        ouvirZlink(a)
         if (usarCabo(a)) procurarJaPlugado(a)
     }
 
     /** Aparelho plugado: pelo aviso do Android ([doSistema] = false) ou pela CaboActivity (true). */
     fun plugou(ctx: Context, d: UsbDevice, doSistema: Boolean) {
-        anotar("plugou", d)
+        anotar(if (doSistema) "plugou (tela do sistema)" else "plugou", d)
         if (usarCabo(ctx)) tratar(ctx, d, if (doSistema) SISTEMA else AVISO)
+    }
+
+    /** Aparelho solto: fecha as conversas dele e, se nenhum celular voltar em [FIM_EPISODIO_MS], encerra a plugada. */
+    private fun soltou(ctx: Context, d: UsbDevice) {
+        anotar("soltou", d)
+        val desde = synchronized(this) { alheios.remove(d.deviceName); tentativas.remove(d.deviceName); avisoEm.remove(d.deviceName) }
+        if (ehAcessorio(d) || pareceCelular(d))
+            Registro.anotar("cabo USB: soltou ${hex(d)} ${d.deviceName}" + (desde?.let { " (ficou ${(SystemClock.elapsedRealtime() - it) / 100 / 10.0} s)" } ?: ""))
+        CaboCelular.soltouCabo(d.deviceName)
+        AndroidAuto.soltouCabo(d.deviceName)
+        linha.postDelayed({ talvezFimDaPlugada(ctx) }, FIM_EPISODIO_MS)
+    }
+
+    private fun temCelularNoCabo(ctx: Context): Boolean {
+        val um = ctx.getSystemService(Context.USB_SERVICE) as UsbManager
+        return um.deviceList.values.any { ehAcessorio(it) || pareceCelular(it) }
+    }
+
+    private fun talvezFimDaPlugada(ctx: Context) {
+        val p = plugada ?: return
+        if (temCelularNoCabo(ctx)) return
+        synchronized(this) {
+            if (plugada !== p) return
+            plugada = null
+            alheios.clear(); tentativas.clear()
+            if (p.desistiu || aviso.startsWith("o ZLink")) aviso = ""
+        }
+        Registro.anotar("cabo USB: o celular saiu do cabo (plugada de ${(SystemClock.elapsedRealtime() - p.inicio) / 1000} s: " +
+            "${p.total} pedidos nossos, ${p.alheias} trocas de outro app" + (if (p.ligou) ", Android Auto ligou" else "") +
+            (if (p.desistiu) ", desisti" else "") + ")")
+    }
+
+    /** A plugada de agora (cria se não houver). */
+    private fun plugadaAtual(): Plugada = synchronized(this) { plugada ?: Plugada().also { plugada = it } }
+
+    /** Espera antes do próximo pedido nosso: os 3 primeiros na hora (corrida), depois 1 s, 2 s, 3 s... */
+    private fun esperaDaTroca(p: Plugada): Long = if (p.trocas < 3) 0L else 1_000L * (p.trocas - 2)
+
+    /** Passou do limite: larga o cabo até ele ser solto, com aviso (uma vez) e sem laço. */
+    private fun desistir(ctx: Context, p: Plugada, nome: String, porque: String) {
+        val primeira = synchronized(this) {
+            alheios.add(nome)
+            if (p.desistiu) false else { p.desistiu = true; true }
+        }
+        if (!primeira) return
+        aviso = "o ZLink não largou o cabo ($porque). Tire e ponha o cabo do celular."
+        Registro.anotar("cabo USB: desisti nesta plugada: $porque (${p.total} pedidos nossos, ${p.alheias} trocas de outro app). " +
+            "Fico parado até o cabo ser solto." + if (p.zlink.isNotEmpty()) " ZLink disse: " + p.zlink.joinToString(", ").take(200) else "")
+        Rede.naTela { try { Voz.falar("O Android Auto pelo cabo não conectou. Tire e ponha o cabo do celular.", Voz.Tipo.IMPORTANTE) } catch (_: Throwable) { } }
+    }
+
+    /**
+     * O Android Auto do celular não responde ao TLS (etapa [AaSessao.ETAPA_TLS_ESPERANDO]): quase sempre é o celular
+     * bloqueado ou pedindo para aceitar o carro novo (1ª vez). Avisa uma vez por plugada.
+     */
+    fun esperandoCelular() {
+        val p = plugada ?: return
+        val primeira = synchronized(this) { if (p.avisouDesbloquear) false else { p.avisouDesbloquear = true; true } }
+        if (!primeira) return
+        aviso = "desbloqueie o celular e aceite o Android Auto"
+        Rede.naTela { try { Voz.falar("Desbloqueie o celular e aceite o Android Auto.", Voz.Tipo.IMPORTANTE) } catch (_: Throwable) { } }
+    }
+
+    /** O Android Auto ligou pelo cabo (canais abertos). */
+    fun androidAutoLigou() {
+        aviso = ""
+        val p = plugada ?: return
+        synchronized(this) {
+            p.ligou = true
+            p.trocas = 0          // ligou: uma queda depois começa a contagem de novo
+            p.desistiu = false
+            tentativas.clear()
+        }
+        val desde = (SystemClock.elapsedRealtime() - p.inicio) / 100 / 10.0
+        Registro.anotar("cabo USB: Android Auto ligado $desde s depois de plugar (${p.total} pedidos nossos, ${p.alheias} trocas de outro app)")
+    }
+
+    /** Avisos do ZLink (ação "com.zjinnova.zlink", extra "status"): só para o registro e o diagnóstico. */
+    private fun ouvirZlink(a: Context) {
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                val ex: Bundle = i.extras ?: Bundle()
+                @Suppress("DEPRECATION")
+                val status = try { ex.get("status")?.toString() } catch (_: Throwable) { null } ?: "?"
+                @Suppress("DEPRECATION")
+                val outros = try {
+                    ex.keySet().filter { it != "status" }.joinToString(" ") { k -> "$k=" + (ex.get(k)?.toString() ?: "").take(40) }
+                } catch (_: Throwable) { "" }
+                val linhaZ = ("zlink: $status " + outros).trim().take(160)
+                val p = plugada
+                synchronized(zlinkVistos) {
+                    if (zlinkVistos.lastOrNull()?.endsWith(linhaZ) == true) return
+                    zlinkVistos.addLast(hora.format(Date()) + " " + linhaZ)
+                    while (zlinkVistos.size > 12) zlinkVistos.removeFirst()
+                }
+                if (p != null && p.zlink.size < 8) {
+                    p.zlink.add("$status (+${(SystemClock.elapsedRealtime() - p.inicio) / 100 / 10.0} s)")
+                }
+                Registro.anotar(linhaZ)
+            }
+        }
+        try {
+            val f = IntentFilter(ACAO_ZLINK)
+            if (Build.VERSION.SDK_INT >= 33) a.registerReceiver(r, f, null, linha, Context.RECEIVER_EXPORTED) else a.registerReceiver(r, f, null, linha)
+        } catch (e: Throwable) {
+            Registro.anotar("cabo USB: não consegui ouvir o ZLink (${e.javaClass.simpleName})")
+        }
     }
 
     private fun procurarJaPlugado(ctx: Context) {
@@ -265,20 +440,34 @@ object CaboUsb {
     /**
      * A conversa pelo cabo acabou. Se o aparelho continua plugado, abre de novo (o celular também reabre do lado dele).
      * Se ele nunca respondeu, é outro app com o cabo (ou, na 1ª vez, o Leonardo ainda não tocou em OK no celular).
+     * [semTls] (Android Auto): respondeu à versão mas o TLS não terminou — como no Headunit Revived, pede de novo o
+     * modo acessório (o Android Auto do celular recomeça do zero) em vez de reabrir o mesmo acessório.
      */
-    fun caboTerminou(ctx: Context, nome: String, respondeu: Boolean, durouMs: Long) {
+    fun caboTerminou(ctx: Context, nome: String, respondeu: Boolean, durouMs: Long, semTls: Boolean = false) {
         if (!usarCabo(ctx)) return
         val um = ctx.getSystemService(Context.USB_SERVICE) as UsbManager
         if (um.deviceList.values.none { it.deviceName == nome }) return   // soltou: espera a próxima plugada
+        val aa = modo(ctx) == MODO_AA
         val espera: Long = synchronized(this) {
             val curta = durouMs < 20_000
             val n = (if (respondeu && !curta) 0 else tentativas[nome] ?: 0) + 1
             tentativas[nome] = n
             val primeiraVez = SystemClock.elapsedRealtime() - trocouEm < 90_000
+            // Android Auto: o acessório que não responde à versão é "de outro" (o ZLink pôs a identidade dele, ou
+            // escreveu por cima da nossa); o que respondeu mas parou no TLS fica "velho". Os dois recebem de novo o
+            // pedido do modo Android Auto ([tratar] com DE_NOVO), dentro do limite da plugada ([MAX_TROCAS]).
+            if (aa && (!respondeu || semTls)) {
+                val p = plugadaAtual()
+                if (p.desistiu) { alheios.add(nome); return }
+                if (!respondeu) p.alheias++
+                trocarDeNovo.add(nome)
+                Registro.anotar("cabo USB: " + (if (!respondeu) "o acessório não respondeu como Android Auto (identidade de outro app?)"
+                    else "o Android Auto respondeu mas o TLS não terminou") + "; vou pedir de novo o modo Android Auto")
+                return@synchronized maxOf(300L, esperaDaTroca(p))
+            }
             if (!respondeu && (n > 4 || (!primeiraVez && n > 1))) {
                 alheios.add(nome)
-                aviso = if (modo(ctx) == MODO_AA) "o Android Auto do celular não respondeu pelo cabo (o ZLink pegou o cabo?)"
-                    else "o celular não respondeu pelo cabo (o ZLink/Android Auto pegou o cabo?)"
+                aviso = "o celular não respondeu pelo cabo (o ZLink/Android Auto pegou o cabo?)"
                 Registro.anotar("cabo USB: $aviso Sigo pela rede Bluetooth até o cabo ser solto.")
                 return
             }
@@ -347,29 +536,68 @@ object CaboUsb {
         if (origem != PERMITIU && CaboCelular.prefs(ctx).getInt("cabo_pedidos", 0) != 0)
             CaboCelular.prefs(ctx).edit().putInt("cabo_pedidos", 0).apply()
         ultimoTratado = d.deviceName; ultimoTratadoEm = agora
-        Thread({
+        // A tela do sistema (CaboActivity) pode chegar atrasada, com um aparelho que já saiu (ex.: depois do "Abrir com").
+        if (um.deviceList.values.none { it.deviceName == d.deviceName }) {
+            Registro.anotar("cabo USB: ${hex(d)} ${d.deviceName} já não está no cabo (aviso atrasado); ignorei")
+            return
+        }
+        val aa = modo(ctx) == MODO_AA
+        val p = if (aa) plugadaAtual() else null
+        if (p != null && p.desistiu) { alheios.add(d.deviceName); return }   // desistiu nesta plugada: parado até soltar
+        if (p != null && !ehAcessorio(d)) p.viuNormal = true
+        val trocar = when {
+            !ehAcessorio(d) -> true
+            p == null -> false
+            trocarDeNovo.remove(d.deviceName) -> true
+            origem == AVISO || origem == SISTEMA -> {
+                val nosso = p.nossoEm > 0 && agora - p.nossoEm < JANELA_NOSSO_MS
+                if (nosso || !p.viuNormal) false   // nosso, ou não sabemos de onde veio (o app abriu com ele assim): tenta falar
+                else {
+                    p.alheias++
+                    Registro.anotar("cabo USB: o celular voltou como acessório SEM pedido nosso: outro app (o ZLink) trocou o modo (vez ${p.alheias})")
+                    true
+                }
+            }
+            else -> false
+        }
+        if (trocar && p != null) {
+            if (p.trocas >= MAX_TROCAS) { desistir(ctx, p, d.deviceName, "$MAX_TROCAS pedidos do Android Auto sem conseguir"); return }
+        }
+        val espera = if (trocar && p != null) esperaDaTroca(p) else 0L
+        val trabalho = Runnable {
             try {
-                val aa = modo(ctx) == MODO_AA
-                val falhas = synchronized(this@CaboUsb) { tentativas[d.deviceName] ?: 0 }
-                if (ehAcessorio(d) && aa && origem == DE_NOVO && falhas >= 1 && trocarParaAcessorio(um, d, TEXTOS_AA)) {
-                    // Acessório "de outro" (ex.: o ZLink pôs o celular no modo dele e o Android Auto não responde):
-                    // pede de novo o modo acessório com a identidade do Android Auto (o Headunit Revived faz igual).
-                    trocouEm = SystemClock.elapsedRealtime()
-                    Registro.anotar("cabo USB: o acessório não respondia; pedi de novo o modo Android Auto ao ${hex(d)}")
-                } else if (ehAcessorio(d)) {
+                if (um.deviceList.values.none { it.deviceName == d.deviceName }) return@Runnable   // saiu durante a espera
+                if (trocar) trocarAgora(ctx, um, d, if (aa) TEXTOS_AA else TEXTOS, aa, p)
+                else {
                     val canal = abrir(um, d)
                     if (canal != null) {
                         Registro.anotar("cabo USB: canal aberto com o celular (${d.productName ?: hex(d)}) para o " + if (aa) "Android Auto" else "app do celular")
                         if (aa) AndroidAuto.entregarCabo(ctx, canal) else CaboCelular.entregarCabo(canal)
                     } else Registro.anotar("cabo USB: não abri o acessório (outro app, como o ZLink, pegou antes?)")
-                } else if (trocarParaAcessorio(um, d, if (aa) TEXTOS_AA else TEXTOS)) {
-                    trocouEm = SystemClock.elapsedRealtime()
-                    Registro.anotar("cabo USB: pedi o modo acessório ao ${hex(d)} (" + (if (aa) "identidade Android Auto" else "identidade Painel ASX") + "); ele vai voltar como 18d1:2d00")
                 }
             } catch (e: Exception) {
                 Registro.anotar("ERRO cabo USB: ${e.javaClass.simpleName}: ${e.message}")
             }
-        }, "cabo-usb").start()
+        }
+        // Na linha "cabo-rapido" (fora da trava deste objeto): na frente da fila, ou depois da espera da briga.
+        if (espera == 0L) linha.postAtFrontOfQueue(trabalho) else linha.postDelayed(trabalho, espera)
+    }
+
+    /** Pede o modo acessório e registra quanto tempo levou desde o aviso (corrida com o ZLink) e o que falhou. */
+    private fun trocarAgora(ctx: Context, um: UsbManager, d: UsbDevice, textos: Array<String>, aa: Boolean, p: Plugada?) {
+        val t0 = SystemClock.elapsedRealtime()
+        val aviso0 = synchronized(this) { avisoEm[d.deviceName] }
+        val falha = trocarParaAcessorio(um, d, textos)
+        val agora = SystemClock.elapsedRealtime()
+        val tempo = "em ${agora - t0} ms" + (aviso0?.let { ", ${t0 - it} ms depois do aviso" } ?: "")
+        if (falha != null) {
+            Registro.anotar("cabo USB: pedido do modo acessório ao ${hex(d)} falhou: $falha ($tempo)")
+            return
+        }
+        trocouEm = agora
+        if (p != null) synchronized(this) { p.trocas++; p.total++; p.nossoEm = agora }
+        Registro.anotar("cabo USB: pedi o modo acessório ao ${hex(d)} (" + (if (aa) "identidade Android Auto" else "identidade Painel ASX") +
+            (if (p != null) ", pedido ${p.trocas} de $MAX_TROCAS" else "") + ", $tempo); ele vai voltar como 18d1:2d00")
     }
 
     /** Mostra o "Permitir" do Android (quem toca é o Leonardo). Nunca mais de [MAX_PEDIDOS] vezes seguidas. */
@@ -390,21 +618,24 @@ object CaboUsb {
         try { um.requestPermission(d, pi) } catch (e: Exception) { Registro.anotar("cabo USB: pedido de permissão falhou (${e.javaClass.simpleName})") }
     }
 
-    /** Celular normal -> modo acessório (AOA 51/52/53). */
-    private fun trocarParaAcessorio(um: UsbManager, d: UsbDevice, textos: Array<String>): Boolean {
-        val c = um.openDevice(d) ?: return false
+    /**
+     * Celular -> modo acessório (AOA 51/52/53). Também serve para um celular JÁ no modo acessório (2d00): o pedido novo
+     * troca a identidade (é o que o ZLink faz quando o app dele não responde). Devolve null = pedido feito, ou o motivo.
+     */
+    private fun trocarParaAcessorio(um: UsbManager, d: UsbDevice, textos: Array<String>): String? {
+        val c = try { um.openDevice(d) } catch (e: Exception) { null } ?: return "não abri o aparelho (já saiu do cabo?)"
         try {
             val b = ByteArray(2)
             val n = c.controlTransfer(0xC0, 51, 0, 0, b, 2, 1000)
             val versao = if (n == 2) (b[0].toInt() and 0xFF) or ((b[1].toInt() and 0xFF) shl 8) else 0
-            if (versao < 1) { Registro.anotar("cabo USB: ${hex(d)} não aceita o modo acessório (n=$n)"); return false }
+            if (versao < 1) return "não aceita o modo acessório (resposta $n)"
             for (i in textos.indices) {
                 val dados = (textos[i] + "\u0000").toByteArray(Charsets.UTF_8)
-                if (c.controlTransfer(0x40, 52, 0, i, dados, dados.size, 1000) < 0) return false
+                if (c.controlTransfer(0x40, 52, 0, i, dados, dados.size, 1000) < 0) return "o texto $i não passou (o celular trocou de modo no meio? outro app foi mais rápido?)"
             }
             // -1 aqui é normal: o celular já começou a voltar como acessório antes de confirmar (o HUR aceita).
             c.controlTransfer(0x40, 53, 0, 0, null, 0, 1000)
-            return true
+            return null
         } finally {
             c.close()
         }
@@ -538,7 +769,15 @@ object CaboUsb {
             }
         }
 
-        // 4. O que está plugado agora e o que foi plugado (com as interfaces: tira a dúvida do 0xff80).
+        // 4. A plugada de agora (briga com o ZLink) e os últimos avisos do ZLink.
+        val p = plugada
+        sb.append("plugada agora: ").append(if (p == null) "nenhuma" else "há ${(SystemClock.elapsedRealtime() - p.inicio) / 1000} s · " +
+            "${p.trocas}/$MAX_TROCAS pedidos nossos (${p.total} no total) · ${p.alheias} trocas de outro app" + (if (p.ligou) " · Android Auto ligou" else "") +
+            (if (p.desistiu) " · DESISTI até soltar o cabo" else "")).append('\n')
+        sb.append("avisos do ZLink (com.zjinnova.zlink):\n")
+        synchronized(zlinkVistos) { if (zlinkVistos.isEmpty()) sb.append("  nenhum\n") else zlinkVistos.forEach { sb.append("  ").append(it).append('\n') } }
+
+        // 5. O que está plugado agora e o que foi plugado (com as interfaces: tira a dúvida do 0xff80).
         val um = ctx.getSystemService(Context.USB_SERVICE) as UsbManager
         val agora = um.deviceList.values
         sb.append("plugados agora: ").append(if (agora.isEmpty()) "nenhum" else "").append('\n')
