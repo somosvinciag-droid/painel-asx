@@ -62,6 +62,24 @@ object Comandos {
         return "Desculpe, senhor, não entendi: \"$falado\"."
     }
 
+    /** Abre a tela de senha do app de fábrica NWD. Só abre: digitar a senha e tocar nas opções é com o Leonardo. */
+    private fun abrirMenuDeFabrica(ctx: Context): String {
+        val pac = "com.nwd.factory.setting"
+        val opcoes = listOf(Intent().setComponent(android.content.ComponentName(pac, "$pac.LoginActivity")),
+            ctx.packageManager.getLaunchIntentForPackage(pac))
+        for (i in opcoes) {
+            if (i == null) continue
+            try {
+                ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                Registro.anotar("abriu o menu de fábrica (${i.component?.className ?: "tela inicial do app"})")
+                return "Abri o menu de fábrica. Digite a senha de fábrica. Não use restaurar padrão."
+            } catch (e: Exception) {
+                Registro.anotar("menu de fábrica: não abriu ${i.component?.className ?: pac} (${e.javaClass.simpleName})")
+            }
+        }
+        return "Não consegui abrir o menu de fábrica daqui. Abra pelas Configurações do carro."
+    }
+
     private val NUMEROS = mapOf("uma" to 1, "um" to 1, "duas" to 2, "dois" to 2, "tres" to 3, "quatro" to 4, "cinco" to 5,
         "seis" to 6, "dez" to 10, "quinze" to 15, "vinte" to 20, "trinta" to 30, "quarenta" to 40, "meia" to 30)
 
@@ -79,6 +97,22 @@ object Comandos {
                     .setData(android.net.Uri.parse("package:$pacote")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 "Abri a página do ${Apps.nomeDe(ctx, pacote)}. Toque em Desativar ou em Forçar parada."
             } catch (e: Exception) { "Não consegui abrir a página desse app." }
+        }
+        // "menu de fábrica": só ABRE a tela de senha do app de fábrica NWD (o Leonardo digita e escolhe; nada é mudado aqui).
+        if (Regex("(menu|configuracoes|configuracao|ajustes) de fabrica").containsMatchIn(t) &&
+            !Regex("restaur|reset|apag|zera|padrao").containsMatchIn(t)) return abrirMenuDeFabrica(ctx)
+        // "modo do cabo Android Auto / ZLink / app do celular" (o mesmo seletor do cartão Celular).
+        if (t == "modo do cabo" || t == "qual o modo do cabo") return "O modo do cabo está em ${CaboUsb.nomeModo(CaboUsb.modo(ctx))}."
+        Regex("^(muda o |mudar o |coloca o |poe o )?modo do cabo( para| pra| em| no| na)? (.+)$").find(t)?.let {
+            val q = it.groupValues[3]
+            val m = when {
+                q.contains("zlink") || q.contains("z link") -> CaboUsb.MODO_ZLINK
+                q.contains("android") || q.contains("auto") || q.contains("painel") -> CaboUsb.MODO_AA
+                q.contains("app") || q.contains("celular") -> CaboUsb.MODO_APP
+                else -> return "O modo do cabo está em ${CaboUsb.nomeModo(CaboUsb.modo(ctx))}. Fale: modo do cabo Android Auto."
+            }
+            CaboUsb.mudarModo(ctx, m)
+            return "Modo do cabo: ${CaboUsb.nomeModo(m)}. Tire e ponha o cabo de novo."
         }
         // Limite de velocidade
         Regex("^(muda o |mudar o |coloca o |poe o )?limite( de velocidade)?( para| pra| em| de)? (\\d{2,3})").find(t)?.let {
