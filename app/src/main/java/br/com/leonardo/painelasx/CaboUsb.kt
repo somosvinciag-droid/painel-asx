@@ -463,6 +463,15 @@ object CaboUsb {
         val um = ctx.getSystemService(Context.USB_SERVICE) as UsbManager
         if (um.deviceList.values.none { it.deviceName == nome }) return   // soltou: espera a próxima plugada
         val aa = modo(ctx) == MODO_AA
+        // Android Auto que FUNCIONOU (passou do TLS) e caiu com o cabo plugado: reinicia o USB do celular em vez de reabrir
+        // o mesmo acessório. Ele volta como aparelho comum em ~1 s e o pedido do AA sai de novo ([tratar]).
+        if (aa && respondeu && (semTls || durouMs >= 20_000)) {
+            val d = um.deviceList.values.firstOrNull { it.deviceName == nome }
+            if (d != null && ehAcessorio(d) && reiniciarUsb(um, d)) {
+                Registro.anotar("cabo USB: o Android Auto caiu com o cabo plugado; reiniciei o USB do celular para começar do zero")
+                return
+            }
+        }
         val espera: Long = synchronized(this) {
             val curta = durouMs < 20_000
             val n = (if (respondeu && !curta) 0 else tentativas[nome] ?: 0) + 1
@@ -510,6 +519,36 @@ object CaboUsb {
     fun caboRespondeu() { aviso = "" }
 
     private fun ehAcessorio(d: UsbDevice) = d.vendorId == GOOGLE && d.productId in PIDS_ACESSORIO
+
+    /** O celular está no cabo e o modo é "Android Auto pelo Painel" (a música vem pelo AA, não pela Música BT). */
+    fun celularNoCabo(ctx: Context): Boolean = try {
+        modo(ctx) == MODO_AA && (ctx.getSystemService(Context.USB_SERVICE) as UsbManager).deviceList.values
+            .any { ehAcessorio(it) || pareceCelular(it) }
+    } catch (_: Throwable) { false }
+
+    /**
+     * Reinicia o USB do celular (como tirar e pôr o cabo): o celular volta como aparelho comum e recebe um pedido NOVO do
+     * Android Auto. Serve quando a conversa caiu com o cabo plugado: reabrir o mesmo acessório lê bytes cifrados velhos
+     * ("quadro cifrado antes da hora", 01/11 17:14) e o celular não sai sozinho do modo acessório.
+     * `UsbDeviceConnection.resetDevice()` é escondido no Android 10 (o Open Headunit faz o mesmo pelo libusb); o ioctl é
+     * no nosso próprio descritor do aparelho. Sem ele, fica o pedido de modo de sempre.
+     */
+    private fun reiniciarUsb(um: UsbManager, d: UsbDevice): Boolean {
+        val m = metodoReset ?: return false
+        val c = try { um.openDevice(d) } catch (_: Throwable) { null } ?: return false
+        return try { (m.invoke(c) as? Boolean) == true } catch (t: Throwable) {
+            Registro.anotar("cabo USB: não reiniciei o USB (${(t.cause ?: t).javaClass.simpleName})"); false
+        } finally { try { c.close() } catch (_: Throwable) { } }
+    }
+
+    private val metodoReset: java.lang.reflect.Method? by lazy {
+        try {
+            // "Reflexão dupla": no Android 10 o método escondido é procurado como se fosse pelo próprio sistema.
+            val procurar = Class::class.java.getDeclaredMethod("getDeclaredMethod", String::class.java, arrayOf<Class<*>>()::class.java)
+            (procurar.invoke(android.hardware.usb.UsbDeviceConnection::class.java, "resetDevice", arrayOf<Class<*>>()) as java.lang.reflect.Method)
+                .apply { isAccessible = true }
+        } catch (t: Throwable) { Registro.anotar("cabo USB: reinício do USB indisponível (${t.javaClass.simpleName})"); null }
+    }
 
     private fun temMtp(d: UsbDevice) = (0 until d.interfaceCount).any { d.getInterface(it).interfaceClass == UsbConstants.USB_CLASS_STILL_IMAGE }
 

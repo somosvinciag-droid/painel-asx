@@ -239,5 +239,11 @@ class AaMotorTls(ctx: SSLContext, cliente: Boolean = true, protocolos: Array<Str
         return ctl to cifrar(b)
     }
 
+    /** Para o registro: versão do TLS, cifra e estado (diagnóstico de quedas). */
+    @Synchronized fun descricao(): String = try {
+        "${motor.session.protocol} ${motor.session.cipherSuite} · aperto=${motor.handshakeStatus}" +
+            " · entrada fechada=${motor.isInboundDone} · saída fechada=${motor.isOutboundDone}"
+    } catch (t: Throwable) { "?" }
+
     fun fechar() { try { motor.closeOutbound() } catch (_: Exception) { } }
 }

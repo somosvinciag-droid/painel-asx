@@ -43,13 +43,19 @@ object Rotina {
         val mus = musica(ctx) ?: if (musicaBtSozinha(ctx)) MUSICA_BT else null
         val nav = navegacao(ctx)
         var espera = 1500L
+        // Com o celular no cabo (Android Auto pelo Painel), a música vem pelo Android Auto: a Música BT NÃO abre por
+        // cima da tela dele (teste de 01/11 17:11). Conferido na hora de cada passo (o AA liga uns segundos depois).
+        val semBt = { mus == MUSICA_BT && (AndroidAuto.ligado || CaboUsb.celularNoCabo(ctx)) }
         if (mus != null) {
-            h.postDelayed({ Apps.abrir(ctx, mus) }, espera)
+            h.postDelayed({
+                if (semBt()) Registro.anotar("rotina: celular no cabo (Android Auto): não abri a Música BT")
+                else Apps.abrir(ctx, mus)
+            }, espera)
             if (tocarSozinho(ctx)) {
-                h.postDelayed({ teclaMidia(ctx, KeyEvent.KEYCODE_MEDIA_PLAY) }, espera + 4000)
+                h.postDelayed({ if (!semBt()) teclaMidia(ctx, KeyEvent.KEYCODE_MEDIA_PLAY) }, espera + 4000)
                 // O Bluetooth do celular às vezes conecta uns segundos depois: um segundo "play" mais tarde.
                 if (mus == MUSICA_BT) h.postDelayed({
-                    if (!Musica.centralTocando(ctx)) teclaMidia(ctx, KeyEvent.KEYCODE_MEDIA_PLAY)
+                    if (!semBt() && !Musica.centralTocando(ctx)) teclaMidia(ctx, KeyEvent.KEYCODE_MEDIA_PLAY)
                 }, espera + 12000)
             }
             espera += 6000
