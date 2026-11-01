@@ -354,6 +354,34 @@ Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica
   (fora das regras atuais do Leonardo; perguntar antes).
 - Testes JVM: `scratchpad/zlink-a2/rodar.sh` (188 + 5), com o teste [10] "celular calado no TLS".
 
+### Desligar o ZLink (pacotes `zlink/` e `canal/`, ramo `rascunho-zlink`)
+- Por que o Painel não ganha a briga sozinho (CONFIRMADO no AOSP 10): o aviso USB vai a TODOS os receptores de tempo de
+  execução ao mesmo tempo (prioridade não vale), `config_disableUsbPermissionDialogs=true` dá o cabo a qualquer app, e
+  qualquer app com o celular aberto manda os pedidos AOA. Desligar outro app exige `CHANGE_COMPONENT_ENABLED_STATE`
+  (signature|privileged); `killBackgroundProcesses` não mata serviço em 1º plano.
+- Diagnóstico "--- zlink ---" (`DiagnosticoZlink`, SÓ leitura): estado do pacote, raio-x do manifesto (`RaioXApk`, AXML sem
+  dependências), quem recebe os avisos, props do adb, SONDAGEM do adbd em 127.0.0.1 (só manda CNXN, nunca a chave: nenhum
+  aviso aparece), se existe o `UsbDebuggingActivity`, e fábrica NWD só lida (`factory_feature` bit 0x40000, .ini).
+  As strings do dex/arsc do ZLink (alguns MB) só entram quando o Claude pede `diagnostico_central` (`completo = true`);
+  no botão "Enviar diagnóstico" (linha principal) vai o último raio-x guardado.
+- Botões "⛔ Desligar o ZLink (uma vez)" e "↩ Religar o ZLink" no cartão Celular (`DesligarZlink`). SÓ com o toque do
+  Leonardo, nunca sozinho nem pelo conector. Sonda o adbd local; fechado = uma frase ("a central não deixa o Painel usar o
+  modo de depuração dela") e nada muda. Aberto = cliente ADB (`canal/AdbUsb.kt`, chave em `noBackupFilesDir/adb/
+  central-local.pk8`) roda `pm disable-user --user 0 com.zjinnova.zlink` (o shell pode, CONFIRMADO no PMS do Android 10;
+  vale depois do boot), `am force-stop` e confere em `pm list packages -d`. Religar = `pm enable`. Na 1ª vez a central
+  mostra "Permitir depuração USB?": quem toca é o Leonardo ("Sempre permitir" + OK). Cada passo vai para o registro
+  ("zlink: …"). A porta do adb não é mexida (o Painel não a abre nem fecha).
+- SUPOSIÇÃO (só a central responde): o adbd da central escutar em rede. Aposta: fechado (configfs com ep0 = só USB).
+- Opções que existem mas NÃO estão no app (perguntar ao Leonardo antes; regra: nada de escrever em fábrica sem ele pedir):
+  - Menu de fábrica NWD (`com.nwd.factory.setting/.LoginActivity`, senha padrão 1617 na suíte GDM K4811): desligar a função
+    "CarPlay" (0x40000) põe o ZLink no `/cache/Carkit_Uninstall.ini` ("não instalar no boot"), salvo se
+    `carplay_install_enable=1` no `UartConfig.ini`. ~8–10 toques do Leonardo; visto no código NWD, não nesta central.
+  - Abrir a porta do adb pelo canal NWD de propriedades (`persist.adb.tcp.port=5555`): precisaria de um app ajudante com
+    targetSdk 19 (o Settings.System recusa o Painel) e de um reinício; o canal não aplicou nada em 31/10.
+- Testes JVM (fora do repo): `scratchpad/zlink/teste/rodar.sh` (18): sondagem (fechada, porta que não é adb, adbd falso
+  sem mandar chave), desligar com `pm`/`am` falsos (1ª vez pede o toque, 2ª "já estava"), religar sem toque, sem adb,
+  relatório com e sem strings. Estudo completo: `scratchpad/zlink/agente1.md`.
+
 ### O que só o teste no carro responde
 - Se o ZLink pega o cabo antes (caso A/B; ver o diagnóstico "--- cabo USB ---") e se o "usar por padrão" segura.
 - Se o AA do Redmi aceita o certificado de referência e o tipo "moto" sem perguntar nada (1ª vez: aceitar o carro novo

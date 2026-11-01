@@ -353,6 +353,16 @@ class MainActivity : Activity() {
             mostrar("Pronto. Tire e ponha o cabo do celular para valer.", falar = false)
         }
         cel.addView(grupo)
+        // ZLink de fábrica: desligar/religar pelo adb da própria central. Só com o toque do Leonardo; quem toca em
+        // "Permitir depuração USB?" é ele (o app nunca aperta Permitir).
+        cel.addView(rotulo("Se o ZLink de fábrica pegar o cabo antes do Painel, dá para desligá-lo (uma vez, com o carro " +
+            "parado). Se a central perguntar \"Permitir depuração USB?\", marque \"Sempre permitir\" e toque em OK."))
+        cel.addView(botao("⛔  Desligar o ZLink (uma vez)", BOTAO, TEXTO, 16f).apply {
+            setOnClickListener { cuidarDoZlink(desligar = true) }
+        }, alto())
+        cel.addView(botao("↩  Religar o ZLink", BOTAO, TEXTO, 15f).apply {
+            setOnClickListener { cuidarDoZlink(desligar = false) }
+        }, alto())
 
         // Viagens (GPS)
         val viag = cartao(direita, "Viagens")
@@ -636,6 +646,31 @@ class MainActivity : Activity() {
     private fun executar(frase: String) {
         if (frase.isBlank()) return
         mostrar(Comandos.executar(this, frase))
+    }
+
+    @Volatile private var zlinkOcupado = false
+
+    /** Botões do ZLink: roda fora da linha principal; cada passo vai para o registro ("zlink: …"). */
+    private fun cuidarDoZlink(desligar: Boolean) {
+        if (zlinkOcupado) { mostrar("Ainda estou cuidando do ZLink. Espere um pouco.", falar = false); return }
+        zlinkOcupado = true
+        Registro.anotar("zlink: Leonardo tocou em \"${if (desligar) "Desligar" else "Religar"} o ZLink\"")
+        mostrar(if (desligar) "Desligando o ZLink…" else "Religando o ZLink…", falar = false)
+        val app = applicationContext
+        val aviso: (String) -> Unit = { a -> runOnUiThread { mostrar(a, falar = false) } }
+        Thread({
+            val r = try {
+                if (desligar) br.com.leonardo.painelasx.zlink.DesligarZlink.desligar(app, aviso)
+                else br.com.leonardo.painelasx.zlink.DesligarZlink.religar(app, aviso)
+            } catch (e: Throwable) {
+                Registro.anotar("ERRO zlink: ${e.javaClass.simpleName}: ${e.message}")
+                null
+            }
+            runOnUiThread {
+                zlinkOcupado = false
+                mostrar(r?.texto ?: "Não consegui. Nada foi mudado.", falar = false)
+            }
+        }, "zlink").start()
     }
 
     private fun mostrar(t: String, falar: Boolean = true) {
