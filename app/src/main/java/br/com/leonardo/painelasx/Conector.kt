@@ -200,7 +200,7 @@ object Conector {
                         else -> { ok = false; "Não achei \"$texto\" na tela." }
                     }
                 }
-                "diagnostico" -> Diagnostico.texto(ctx)
+                "diagnostico" -> Diagnostico.texto(ctx, completo = true)
                 "dados" -> LeitorCarro.dados(ctx).toString(2)
                 "viagens" -> Viagens.resumo(texto.toIntOrNull()?.coerceIn(1, 365) ?: 7).toString(2)
                 "onde" -> Viagens.ondeParou().toString(2)

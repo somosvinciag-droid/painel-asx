@@ -14,7 +14,8 @@ object Diagnostico {
         "bt", "bluetooth", "steer", "canbus", "obd", "tpms", "launcher"
     )
 
-    fun texto(ctx: Context): String {
+    /** [completo] = também as strings do dex do ZLink (só quando o Claude pede o diagnóstico pelo conector). */
+    fun texto(ctx: Context, completo: Boolean = false): String {
         val sb = StringBuilder()
         sb.append("=== Painel ASX — diagnóstico ===\n")
         sb.append("app: v").append(BuildConfig.VERSION_CODE).append('\n')
@@ -50,6 +51,9 @@ object Diagnostico {
 
         sb.append("\n--- cabo USB ---\n")
         sb.append(try { CaboUsb.diagnostico(ctx) } catch (e: Exception) { "(não consegui ler: ${e.javaClass.simpleName})\n" })
+
+        sb.append("\n--- zlink ---\n")
+        sb.append(try { br.com.leonardo.painelasx.zlink.DiagnosticoZlink.paraDiagnostico(ctx, completo) } catch (e: Throwable) { "(não consegui ler: ${e.javaClass.simpleName})\n" })
 
         sb.append("\n--- abriu na partida ---\n")
         sb.append(try { Partida.texto(ctx) } catch (e: Exception) { "(não consegui ler: ${e.javaClass.simpleName})\n" })
