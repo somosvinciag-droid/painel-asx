@@ -288,6 +288,21 @@ object CaboUsb {
                 Registro.anotar("cabo USB: modo padrão gravado: ${nomeModo(m)}")
             } catch (e: Exception) { Registro.anotar("cabo USB: não liguei o filtro (${e.javaClass.simpleName})") }
         }
+        // v29, uma vez só: o modo "ZLink" foi escolhido só para um teste (31/10 20:23). O Leonardo não usa o ZLink e vai
+        // desligá-lo pelo menu de fábrica: volta para o padrão "Android Auto pelo Painel" sem ele precisar tocar.
+        CaboCelular.prefs(a).let { p ->
+            if (!p.getBoolean("modo_aa_v29", false)) {
+                p.edit().putBoolean("modo_aa_v29", true).apply()
+                if (modo(a) == MODO_ZLINK) {
+                    p.edit().putString("cabo_modo", MODO_AA).putInt("cabo_pedidos", 0).apply()
+                    try {
+                        a.packageManager.setComponentEnabledSetting(ComponentName(a.packageName, ALIAS),
+                            PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
+                    } catch (_: Exception) { }
+                    Registro.anotar("cabo USB: modo voltou para Android Auto pelo Painel (v29, uma vez)")
+                }
+            }
+        }
         val f = IntentFilter().apply {
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)

@@ -127,6 +127,18 @@ object DiagnosticoZlink {
         val fab = try { pm.getPackageInfo(FABRICA, PackageManager.GET_ACTIVITIES or PackageManager.MATCH_DISABLED_COMPONENTS) } catch (_: Exception) { null }
         appendLine("  app de fábrica $FABRICA: " + if (fab == null) "não encontrado" else
             "versão ${fab.versionName} · telas: " + (fab.activities?.joinToString { "${it.name.substringAfterLast('.')}(exportada=${it.exported})" } ?: "?"))
+        if (comStrings && fab != null) {
+            // Para guiar o Leonardo no menu de fábrica: nomes das funções (CarPlay/ZLink), telas e senhas que o app conhece.
+            val palavras = listOf("carplay", "zlink", "carkit", "feature", "function", "password", "passwd", "pwd", "1617", "6699",
+                "功能", "密码", "互联", "uninstall")
+            try {
+                val apk = File(fab.applicationInfo.sourceDir)
+                appendLine("  textos do app de fábrica (recursos):")
+                RaioXApk.procurarNoArsc(apk, palavras, 80).forEach { appendLine("    $it") }
+                appendLine("  textos do app de fábrica (código):")
+                RaioXApk.procurarNoDex(apk, palavras, 120).forEach { appendLine("    $it") }
+            } catch (e: Exception) { appendLine("  app de fábrica: não li os textos (${e.javaClass.simpleName}: ${e.message})") }
+        }
         val cfg = Props.ler("ro.nwd.config.path").ifBlank { "/data/nwdappconfig" }
         for (f in listOf("$cfg/app/UartConfig.ini", "$cfg/app/FactoryConfig.ini", "/system/config/app/Carkit_Uninstall.ini",
             "/cache/Carkit_Uninstall.ini", "/system/config/app/FactoryConfig.ini", "$cfg/app/need_hide_packname.ini")) {
