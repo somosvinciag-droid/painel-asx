@@ -46,11 +46,21 @@ interface AaEventos {
     fun navegacao(frase: String, ativa: Boolean) {}
     /** O assistente do Google do celular começou/parou (o "Ok Google" do próprio celular). */
     fun vozSessao(ativa: Boolean) {}
+    /** O celular pediu para sair da tela dele (botão "sair" do Android Auto): a central volta para a tela do Painel. */
+    fun videoNativo() {}
+}
+
+/** Quem mostra o vídeo (TelaAndroidAuto). Chamado na linha de leitura: COPIE e volte rápido. */
+interface AaVideoSaida {
+    /** Configuração do H.264 (SPS/PPS). */
+    fun config(b: ByteArray, ini: Int, n: Int)
+    /** Um quadro H.264 (Annex B, com 00 00 00 01). */
+    fun quadro(b: ByteArray, ini: Int, n: Int)
 }
 
 /**
  * Uma conexão com o Android Auto do celular. [rodar] bloqueia (linha de leitura) até cair e devolve o motivo.
- * Uma linha própria escreve. Nada de vídeo é decodificado: os quadros que vierem são confirmados e jogados fora.
+ * Uma linha própria escreve. O vídeo vai para [video] (TelaAndroidAuto) quando há tela olhando; senão é confirmado e jogado fora.
  */
 class AaSessao(
     private val t: AaTransporte,
@@ -89,6 +99,13 @@ class AaSessao(
         private set
     @Volatile var pedidosVideo = 0
         private set
+    /** Tela que mostra o vídeo (null = ninguém olhando: o vídeo é confirmado e jogado fora, sem copiar). */
+    @Volatile var video: AaVideoSaida? = null
+    /** Última configuração do H.264 que chegou (para um decodificador que abre depois). */
+    @Volatile private var ultimaConfig: ByteArray? = null
+    @Volatile private var focoProjetado = false
+    @Volatile private var videoCombinado = false
+    @Volatile private var pedidoImagemEm = 0L
 
     private val fim = AtomicBoolean(false)
     @Volatile private var motivoFim = ""
@@ -118,6 +135,38 @@ class AaSessao(
         mandar(Aa.CANAL_ENTRADA, Aa.ENTRADA_EVENTO, Aa.tecla(ns, codigo, true))
         mandar(Aa.CANAL_ENTRADA, Aa.ENTRADA_EVENTO, Aa.tecla(ns + 50_000_000, codigo, false))
         return true
+    }
+
+    /** Toque na tela do Android Auto (coordenadas já na escala do vídeo). */
+    fun toque(acao: Int, indice: Int, pontos: IntArray) {
+        if (!conectado || fim.get()) return
+        mandar(Aa.CANAL_ENTRADA, Aa.ENTRADA_EVENTO, Aa.toque(agora() * 1_000_000, acao, indice, pontos))
+    }
+
+    /**
+     * Liga (ou desliga, com null) a tela que mostra o vídeo e pede uma imagem inteira nova ao celular.
+     * O H.264 só pode começar num quadro-chave: com o foco já "projetado", soltar e pegar o foco de novo faz o celular
+     * mandar um em ~0,5 s (medido pelo Open Headunit; não existe mensagem de "manda um quadro-chave").
+     */
+    fun ligarVideo(saida: AaVideoSaida?) {
+        video = saida
+        if (saida == null || !conectado || fim.get()) return
+        ultimaConfig?.let { try { saida.config(it, 0, it.size) } catch (_: Throwable) { } }
+        pedirImagem()
+    }
+
+    /** Pede um quadro-chave (no máximo 1 vez a cada 2 s). */
+    fun pedirImagem() {
+        // Antes de o vídeo ser combinado não manda nada: o 1º quadro depois do "preparar" já é um quadro-chave.
+        if (!conectado || fim.get() || !videoCombinado) return
+        val t = agora()
+        if (t - pedidoImagemEm < 2_000) return
+        pedidoImagemEm = t
+        // Já projetado: solta e pega de novo (o celular recomeça com um quadro-chave). Nativo (saiu): só pega de novo.
+        if (focoProjetado) mandar(Aa.CANAL_VIDEO, Aa.VIDEO_FOCO, Aa.videoFoco(Aa.VIDEO_NATIVO, true))
+        mandar(Aa.CANAL_VIDEO, Aa.VIDEO_FOCO, Aa.videoFoco(Aa.VIDEO_PROJETADO, true))
+        focoProjetado = true
+        ev.registro("aa: pedi a imagem do Android Auto")
     }
 
     /** Modo noite do Android Auto (cores escuras). */
@@ -359,7 +408,8 @@ class AaSessao(
     }
 
     private val separador = AaQuadro.Separador()
-    private val remontador = AaQuadro.Remontador()
+    // O vídeo só é guardado (copiado) quando há uma tela olhando.
+    private val remontador = AaQuadro.Remontador { it == Aa.CANAL_VIDEO && video == null }
 
     private fun ler() {
         ultimoRecebido = agora()
@@ -469,17 +519,34 @@ class AaSessao(
         when (m.tipo) {
             Aa.MIDIA_DADOS -> {
                 quadrosVideo++
-                if (quadrosVideo == 1L) ev.registro("aa: o celular começou a mandar vídeo (confirmo e jogo fora; a tela continua a do Painel)")
+                if (quadrosVideo == 1L) ev.registro("aa: o celular começou a mandar vídeo")
+                val v = video
+                if (v != null && m.fim > m.ini) {
+                    // [8 bytes de carimbo] + H.264; alguns celulares mandam sem o carimbo: acha o 00 00 01.
+                    val ini = if (comecoH264(m.dados, m.ini, m.fim)) m.ini else m.ini + 8
+                    if (ini < m.fim) try { v.quadro(m.dados, ini, m.fim - ini) } catch (t: Throwable) {
+                        umaVez("vquadro", "ERRO aa: tela do vídeo: ${t.javaClass.simpleName}")
+                    }
+                }
                 mandar(c, Aa.MIDIA_ACK, Aa.midiaAck(sessoes[c]))
             }
-            Aa.MIDIA_CONFIG_CODEC -> { }
+            Aa.MIDIA_CONFIG_CODEC -> {
+                if (m.fim > m.ini) {
+                    val cfg = m.dados.copyOfRange(m.ini, m.fim)
+                    ultimaConfig = cfg
+                    umaVez("vconfig", "aa: configuração do vídeo recebida (${cfg.size} bytes)")
+                    video?.let { try { it.config(cfg, 0, cfg.size) } catch (_: Throwable) { } }
+                }
+            }
             Aa.MIDIA_PREPARAR -> {
                 mandar(c, Aa.MIDIA_CONFIG, Aa.midiaConfig(2))
                 // Teste de 01/11 09:09: com o foco "nativo" o Android Auto do celular desiste em ~9 s ("erro de comunicação 7";
                 // o Open Headunit documenta: NATIVE = o celular encerra a projeção). Então dizemos "projetando": o celular manda
                 // o vídeo, o Painel confirma cada quadro e JOGA FORA (nada é decodificado nem mostrado). A tela continua a do Painel.
                 mandar(c, Aa.VIDEO_FOCO, Aa.videoFoco(Aa.VIDEO_PROJETADO, true))
-                ev.registro("aa: vídeo combinado (o Painel recebe e joga fora; a tela continua a do Painel)")
+                focoProjetado = true
+                videoCombinado = true
+                ev.registro("aa: vídeo combinado (foco projetado)")
             }
             Aa.MIDIA_INICIO -> { sessoes[c] = Aa.campoInt(m.dados, m.ini, m.fim, 1, 0).toInt(); umaVez("vinicio", "aa: o celular abriu o vídeo (sessão)") }
             Aa.MIDIA_FIM -> { }
@@ -487,12 +554,19 @@ class AaSessao(
                 pedidosVideo++
                 val modo = Aa.campoInt(m.dados, m.ini, m.fim, 2, 0)
                 if (pedidosVideo <= 3 || pedidosVideo % 20 == 0) ev.registro("aa: o celular pediu o foco de vídeo (modo $modo, pedido $pedidosVideo)")
-                // Damos o que o celular pede (projetado ou nativo): o vídeo nunca aparece na tela de qualquer jeito.
-                mandar(c, Aa.VIDEO_FOCO, Aa.videoFoco(if (modo == Aa.VIDEO_NATIVO.toLong()) Aa.VIDEO_NATIVO else Aa.VIDEO_PROJETADO, false))
+                // Damos o que o celular pede. Nativo = o motorista tocou em "sair" no Android Auto: volta a tela do Painel.
+                val nativo = modo == Aa.VIDEO_NATIVO.toLong()
+                mandar(c, Aa.VIDEO_FOCO, Aa.videoFoco(if (nativo) Aa.VIDEO_NATIVO else Aa.VIDEO_PROJETADO, false))
+                focoProjetado = !nativo
+                if (nativo) try { ev.videoNativo() } catch (_: Throwable) { }
             }
             else -> umaVez("v${m.tipo}", "aa: vídeo tipo ${m.tipo} ignorado")
         }
     }
+
+    private fun comecoH264(b: ByteArray, i: Int, f: Int): Boolean =
+        f - i >= 4 && b[i].toInt() == 0 && b[i + 1].toInt() == 0 &&
+            (b[i + 2].toInt() == 1 || (b[i + 2].toInt() == 0 && b[i + 3].toInt() == 1))
 
     private fun configAudio(c: Int) = when (c) { Aa.CANAL_MIDIA -> 48000 to 2; else -> 16000 to 1 }
 

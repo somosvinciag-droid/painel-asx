@@ -98,6 +98,8 @@ object Comandos {
                 "Abri a página do ${Apps.nomeDe(ctx, pacote)}. Toque em Desativar ou em Forçar parada."
             } catch (e: Exception) { "Não consegui abrir a página desse app." }
         }
+        if (t == "android auto" || Regex("^(abre|abrir|mostra|mostrar|volta pro|volta para o|voltar pro) (o )?android auto$").containsMatchIn(t))
+            return if (AndroidAuto.abrirTela(ctx)) "Android Auto." else "O Android Auto não está ligado. Plugue o celular no cabo."
         // "menu de fábrica": só ABRE a tela de senha do app de fábrica NWD (o Leonardo digita e escolhe; nada é mudado aqui).
         if (Regex("(menu|configuracoes|configuracao|ajustes) de fabrica").containsMatchIn(t) &&
             !Regex("restaur|reset|apag|zera|padrao").containsMatchIn(t)) return abrirMenuDeFabrica(ctx)

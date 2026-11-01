@@ -78,6 +78,16 @@
             </intent-filter>
         </activity>
 
+        <!-- Tela do Android Auto do celular (vídeo pelo cabo + toques). -->
+        <activity
+            android:name=".TelaAndroidAuto"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity="br.com.leonardo.painelasx.carro"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
+
         <activity
             android:name=".TodosApps"
             android:exported="false"
