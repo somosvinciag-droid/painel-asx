@@ -97,6 +97,8 @@ object Jarvis {
         Rede.naTela { Painel.abrir(app) }
         val depoisDaSaudacao = {
             saudando = false
+            // A música do celular volta sozinha (Música BT + play), sem tirar o painel da frente.
+            Rede.naTela { try { Rotina.talvezRodar(app, "carro ligou") } catch (_: Exception) { } }
             Rede.emSegundoPlano("partida") {
                 // 2) Depois: tempo e lembretes (com a voz carregada), Turbo e a música.
                 // Previsão de menos de 10 min atrás serve (a central dorme e acorda várias vezes seguidas).

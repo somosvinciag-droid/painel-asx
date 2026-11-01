@@ -14,7 +14,7 @@ object Turbo {
     private val NUNCA = listOf(
         "zlink", "carbit", "autokit", "tlink", "projection.gearhead", "carplay",
         "launcher", "inputmethod", "keyboard", "systemui", "bluetooth", "phone", "telecom",
-        "com.google.android.gms", "com.android.vending", "com.android.providers", "radio", "canbus", "mcu"
+        "com.google.android.gms", "com.android.vending", "com.android.providers", "radio", "canbus", "mcu", "bt.music", "com.bt.", "com.nwd.bt"
     )
 
     private fun livreMb(am: ActivityManager): Long {

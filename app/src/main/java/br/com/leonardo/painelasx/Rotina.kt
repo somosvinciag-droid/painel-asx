@@ -23,6 +23,9 @@ object Rotina {
     fun navegacao(ctx: Context) = prefs(ctx).getString("navegacao", null)
     fun volume(ctx: Context) = prefs(ctx).getInt("volume", 40)
     fun tocarSozinho(ctx: Context) = prefs(ctx).getBoolean("tocar", true)
+    /** Pedido do Leonardo (31/10): ao ligar o carro, a música do celular (Spotify pelo Bluetooth) volta sozinha. */
+    const val MUSICA_BT = "com.nwd.bt.music"
+    fun musicaBtSozinha(ctx: Context) = prefs(ctx).getBoolean("musica_bt", true)
 
     fun talvezRodar(ctx: Context, motivo: String) {
         if (!ligada(ctx)) return
@@ -37,16 +40,25 @@ object Rotina {
         ultimaVez = SystemClock.elapsedRealtime()
         val h = Handler(Looper.getMainLooper())
         ajustarVolume(ctx, volume(ctx))
-        val mus = musica(ctx)
+        val mus = musica(ctx) ?: if (musicaBtSozinha(ctx)) MUSICA_BT else null
         val nav = navegacao(ctx)
         var espera = 1500L
         if (mus != null) {
             h.postDelayed({ Apps.abrir(ctx, mus) }, espera)
-            if (tocarSozinho(ctx)) h.postDelayed({ teclaMidia(ctx, KeyEvent.KEYCODE_MEDIA_PLAY) }, espera + 4000)
+            if (tocarSozinho(ctx)) {
+                h.postDelayed({ teclaMidia(ctx, KeyEvent.KEYCODE_MEDIA_PLAY) }, espera + 4000)
+                // O Bluetooth do celular às vezes conecta uns segundos depois: um segundo "play" mais tarde.
+                if (mus == MUSICA_BT) h.postDelayed({
+                    if (!Musica.centralTocando(ctx)) teclaMidia(ctx, KeyEvent.KEYCODE_MEDIA_PLAY)
+                }, espera + 12000)
+            }
             espera += 6000
         }
         if (nav != null) {
             h.postDelayed({ Apps.abrir(ctx, nav) }, espera)
+        } else if (mus == MUSICA_BT) {
+            // A Música BT só precisa ficar como fonte do som: a tela volta para o painel do carro.
+            h.postDelayed({ Painel.abrir(ctx) }, espera)
         }
     }
 
