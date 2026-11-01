@@ -25,7 +25,8 @@ import javax.net.ssl.SSLContext
 /**
  * "ZLink nosso": o Painel ASX como receptor de Android Auto pelo cabo (modo do cabo "Android Auto pelo Painel").
  *
- *  - A tela continua a do Painel (TelaCarro): o foco de vídeo fica "nativo" e nenhum vídeo é decodificado.
+ *  - A tela continua a do Painel (TelaCarro): o foco de vídeo é "projetado" (senão o celular desiste, erro 7), mas o vídeo
+ *    é confirmado e jogado fora: nada é decodificado nem mostrado.
  *  - Som pelo cabo: música e voz do GPS no alto-falante do carro ([AaSom]).
  *  - Música (título, artista, capa, tempo) e próxima curva aparecem na TelaCarro; os botões mandam teclas.
  *  - Microfone: a central NÃO anuncia microfone e se diz "moto" -> o "Ok Google" do celular usa o microfone
@@ -299,7 +300,7 @@ object AndroidAuto {
         append("etapa: ").append(etapa).append(" · conexões desde que o app abriu: ").append(conexoes).append('\n')
         if (s != null) {
             append("celular: ").append(s.marcaCelular.ifBlank { "?" }).append(" · versão do protocolo ").append(s.versaoCelular.ifBlank { "?" }).append('\n')
-            append("vídeo recebido e descartado: ").append(s.quadrosVideo).append(" quadros · pedidos de tela recusados: ").append(s.pedidosVideo).append('\n')
+            append("vídeo recebido e descartado: ").append(s.quadrosVideo).append(" quadros · pedidos de foco de vídeo: ").append(s.pedidosVideo).append('\n')
         }
         append("som: ").append(som?.estado() ?: "nenhum").append('\n')
         append("música: ").append(if (temMusica()) (if (tocandoAgora) "tocando" else "pausada") + " (" + appTocando.ifBlank { "?" } + ")" else "nada").append('\n')

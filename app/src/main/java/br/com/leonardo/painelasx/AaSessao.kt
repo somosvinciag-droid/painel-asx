@@ -84,7 +84,7 @@ class AaSessao(
         private set
     @Volatile var versaoCelular = ""
         private set
-    /** Quadros de vídeo que chegaram mesmo com o foco "nativo" (confirmados e descartados). */
+    /** Quadros de vídeo recebidos (confirmados e descartados: nada é mostrado). */
     @Volatile var quadrosVideo = 0L
         private set
     @Volatile var pedidosVideo = 0
@@ -469,23 +469,26 @@ class AaSessao(
         when (m.tipo) {
             Aa.MIDIA_DADOS -> {
                 quadrosVideo++
-                if (quadrosVideo == 1L) ev.registro("aa: o celular mandou vídeo mesmo com a tela nativa (confirmo e jogo fora)")
+                if (quadrosVideo == 1L) ev.registro("aa: o celular começou a mandar vídeo (confirmo e jogo fora; a tela continua a do Painel)")
                 mandar(c, Aa.MIDIA_ACK, Aa.midiaAck(sessoes[c]))
             }
             Aa.MIDIA_CONFIG_CODEC -> { }
             Aa.MIDIA_PREPARAR -> {
                 mandar(c, Aa.MIDIA_CONFIG, Aa.midiaConfig(2))
-                // A tela é NOSSA: foco de vídeo "nativo" (o celular não desenha nem manda vídeo).
-                mandar(c, Aa.VIDEO_FOCO, Aa.videoFoco(Aa.VIDEO_NATIVO, true))
-                ev.registro("aa: vídeo combinado e recusado (tela do Painel)")
+                // Teste de 01/11 09:09: com o foco "nativo" o Android Auto do celular desiste em ~9 s ("erro de comunicação 7";
+                // o Open Headunit documenta: NATIVE = o celular encerra a projeção). Então dizemos "projetando": o celular manda
+                // o vídeo, o Painel confirma cada quadro e JOGA FORA (nada é decodificado nem mostrado). A tela continua a do Painel.
+                mandar(c, Aa.VIDEO_FOCO, Aa.videoFoco(Aa.VIDEO_PROJETADO, true))
+                ev.registro("aa: vídeo combinado (o Painel recebe e joga fora; a tela continua a do Painel)")
             }
             Aa.MIDIA_INICIO -> { sessoes[c] = Aa.campoInt(m.dados, m.ini, m.fim, 1, 0).toInt(); umaVez("vinicio", "aa: o celular abriu o vídeo (sessão)") }
             Aa.MIDIA_FIM -> { }
             Aa.VIDEO_FOCO_PEDIDO -> {
                 pedidosVideo++
                 val modo = Aa.campoInt(m.dados, m.ini, m.fim, 2, 0)
-                if (pedidosVideo <= 3 || pedidosVideo % 20 == 0) ev.registro("aa: o celular pediu a tela (modo $modo, pedido $pedidosVideo); continua a do Painel")
-                mandar(c, Aa.VIDEO_FOCO, Aa.videoFoco(Aa.VIDEO_NATIVO, false))
+                if (pedidosVideo <= 3 || pedidosVideo % 20 == 0) ev.registro("aa: o celular pediu o foco de vídeo (modo $modo, pedido $pedidosVideo)")
+                // Damos o que o celular pede (projetado ou nativo): o vídeo nunca aparece na tela de qualquer jeito.
+                mandar(c, Aa.VIDEO_FOCO, Aa.videoFoco(if (modo == Aa.VIDEO_NATIVO.toLong()) Aa.VIDEO_NATIVO else Aa.VIDEO_PROJETADO, false))
             }
             else -> umaVez("v${m.tipo}", "aa: vídeo tipo ${m.tipo} ignorado")
         }
