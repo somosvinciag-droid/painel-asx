@@ -335,6 +335,25 @@ Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica
   microfone pedido, erros do lado da central, tchau/parar duas vezes, celular mudo, escrita recusada, lixo e quadro
   gigante; e uma 2ª execução com KeyUpdate a cada 16 KB (`keylimits.properties`, 400 pacotes de som + teclas).
 
+### Briga com o ZLink (ramo `rascunho-zlink`, 31/10)
+- Teste de 31/10 20:03: o Redmi entrou como 2717:ff80 (ancoragem USB); o nosso pedido AOA falhou calado e o ZLINK5 pôs o
+  celular no modo acessório DELE (2d00, "nenhum app para este acessório"); o ZLink repetiu o pedido no 2d00 a cada 1–2 s
+  por ~10 s e parou (o celular voltou sozinho como 2717:ff40 PTP, pelo `ACCESSORY_REQUEST_TIMEOUT` de 10 s do celular).
+  O ff40 o ZLink não tocou: o nosso pedido do AA saiu, versão ok (1.7) e o TLS ficou calado ~8 s até o celular sair do cabo
+  (provável: celular esperando desbloquear/aceitar o carro novo; o registro novo responde). O "Abrir com" (Fotos x Painel)
+  apareceu porque o ff40 tem interface PTP: escolher "Painel ASX" + "Sempre" uma vez.
+- `CaboUsb`: receptor USB (prioridade 999) na linha `cabo-rapido`; o pedido do AA sai na hora e o registro diz quantos ms
+  depois do aviso e qual passo falhou. "Plugada" = do 1º aviso até 6 s sem celular no cabo. 2d00 que aparece sem pedido
+  nosso nos últimos 4 s (depois de ver o celular normal) = de outro app → pedido de novo com a identidade do AA (o modo
+  acessório aceita). Acessório que não responde à versão, ou que respondeu e parou no TLS, também recebe pedido novo.
+  Máx. 8 pedidos por plugada (3 na hora, depois 1, 2, 3… s); passou = desiste até soltar o cabo, com aviso e voz.
+  Zera quando o AA liga. Avisos do ZLink (ação `com.zjinnova.zlink`, extra `status`) vão para o registro e o diagnóstico.
+- `AaSessao`: celular calado no TLS espera até 60 s; depois de 4 s a etapa `tls: esperando o celular…` faz a central falar
+  "Desbloqueie o celular e aceite o Android Auto" (1 vez por plugada). Registro: "o celular respondeu ao TLS em X ms".
+- Se o ZLink nunca cansar (8 pedidos perdidos), a saída que sobra é a do Headunit Revived: desligar o ZLink por ADB
+  (fora das regras atuais do Leonardo; perguntar antes).
+- Testes JVM: `scratchpad/zlink-a2/rodar.sh` (188 + 5), com o teste [10] "celular calado no TLS".
+
 ### O que só o teste no carro responde
 - Se o ZLink pega o cabo antes (caso A/B; ver o diagnóstico "--- cabo USB ---") e se o "usar por padrão" segura.
 - Se o AA do Redmi aceita o certificado de referência e o tipo "moto" sem perguntar nada (1ª vez: aceitar o carro novo
