@@ -156,7 +156,7 @@ object Aa {
         val larguraVideo get() = if (video720) 1280 else 800
         val alturaVideo get() = if (video720) 720 else 480
         /** O Android Auto precisa de pelo menos 748x450 dp, senão desenha a versão reduzida (Open Headunit #1101). */
-        val densidade get() = if (video720) 213 else 150
+        val densidade get() = if (video720) 213 else 160
     }
 
     private fun audio(id: Int, tipoAudio: Int, hz: Int, canais: Int) = ProtoEscritor()
