@@ -350,7 +350,13 @@ object CaboUsb {
         Thread({
             try {
                 val aa = modo(ctx) == MODO_AA
-                if (ehAcessorio(d)) {
+                val falhas = synchronized(this@CaboUsb) { tentativas[d.deviceName] ?: 0 }
+                if (ehAcessorio(d) && aa && origem == DE_NOVO && falhas >= 1 && trocarParaAcessorio(um, d, TEXTOS_AA)) {
+                    // Acessório "de outro" (ex.: o ZLink pôs o celular no modo dele e o Android Auto não responde):
+                    // pede de novo o modo acessório com a identidade do Android Auto (o Headunit Revived faz igual).
+                    trocouEm = SystemClock.elapsedRealtime()
+                    Registro.anotar("cabo USB: o acessório não respondia; pedi de novo o modo Android Auto ao ${hex(d)}")
+                } else if (ehAcessorio(d)) {
                     val canal = abrir(um, d)
                     if (canal != null) {
                         Registro.anotar("cabo USB: canal aberto com o celular (${d.productName ?: hex(d)}) para o " + if (aa) "Android Auto" else "app do celular")

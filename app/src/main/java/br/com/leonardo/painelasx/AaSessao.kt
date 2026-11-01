@@ -248,7 +248,17 @@ class AaSessao(
         return false
     }
 
+    private var tlsEnviados = 0
+    private var tlsRecebidos = 0
+
     private fun tls(): Boolean {
+        val ok = tlsPassos()
+        if (!ok) ev.registro("aa: tls parou (${motivoFim}): enviei $tlsEnviados bytes, recebi $tlsRecebidos bytes do celular")
+        else ev.registro("aa: tls: enviei $tlsEnviados bytes, recebi $tlsRecebidos bytes")
+        return ok
+    }
+
+    private fun tlsPassos(): Boolean {
         mudarEtapa("tls: começando")
         val m = AaMotorTls(tlsCtx)
         motor = m
@@ -259,6 +269,7 @@ class AaSessao(
             if (m.precisaEnviar()) {
                 val out = m.handshakeSaida()
                 if (out.isNotEmpty() && !t.escrever(AaQuadro.aberto(Aa.TLS, out))) { motivoFim = "TLS: o cabo não aceitou"; return false }
+                tlsEnviados += out.size
                 continue
             }
             if (m.sobra() > 0) {
@@ -271,6 +282,7 @@ class AaSessao(
             val tipo = tipoDe(q)
             if (q[0].toInt() == 0 && tipo == Aa.VERSAO_RESPOSTA) continue   // resposta atrasada de um pedido repetido
             if (q[0].toInt() != 0 || tipo != Aa.TLS) { motivoFim = "TLS: mensagem inesperada (tipo $tipo)"; return false }
+            tlsRecebidos += q.size - 6
             m.handshakeEntrada(q, 6, q.size - 6)
         }
         // Sobrou algum quadro já lido? (não deveria: o celular espera a nossa autenticação)
