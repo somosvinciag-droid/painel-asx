@@ -220,10 +220,14 @@ class AaSessao(
             if (!t.escrever(Aa.autenticou())) { encerrar("não consegui mandar a autenticação"); return motivoFim }
             tlsOk = true
             mudarEtapa("tls ok")
+            ev.registro("aa: tls ${motor?.descricao()}")
             ultimoRecebido = agora()
             Thread({ escrever() }, "aa-escrever").apply { isDaemon = true }.start()
             ler()
         } catch (e: Throwable) {
+            if (!fim.get()) ev.registro("aa: erro na leitura: ${e.javaClass.simpleName}: ${e.message?.take(300)}" +
+                (e.cause?.let { " · causa ${it.javaClass.simpleName}: ${it.message?.take(200)}" } ?: "") +
+                " · tls ${motor?.descricao()}")
             encerrar("erro: ${e.javaClass.simpleName}: ${e.message?.take(80)}")
         }
         encerrar(motivoFim.ifEmpty { "fim" })
@@ -403,6 +407,9 @@ class AaSessao(
                 if (a - ultimoRecebido > quedaMs) { encerrar("o celular ficou ${quedaMs / 1000} s sem mandar nada"); return }
             }
         } catch (e: Throwable) {
+            if (!fim.get()) ev.registro("aa: erro na escrita: ${e.javaClass.simpleName}: ${e.message?.take(300)}" +
+                (e.cause?.let { " · causa ${it.javaClass.simpleName}: ${it.message?.take(200)}" } ?: "") +
+                " · tls ${motor?.descricao()} · na fila ${fila.size}")
             encerrar("escrita: ${e.javaClass.simpleName}: ${e.message?.take(80)}")
         }
     }
