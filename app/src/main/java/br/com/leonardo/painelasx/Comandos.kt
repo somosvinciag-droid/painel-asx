@@ -46,10 +46,10 @@ object Comandos {
         var jarvis = false
         var t2 = t
         var original = falado.trim()
-        Regex("^(ok |ei |e ai |oi )?(jarvis|jarbas|jarvas)( por favor)?\\b").find(t2)?.let { m ->
+        Regex("^(ok |ei |e ai |oi )?(jarvis|jarbas|jarvas|jervis|jerves|jarves|javis|jarvi|jarviz|jarbes|gervis|jarvez)( por favor)?\\b").find(t2)?.let { m ->
             jarvis = true
             t2 = t2.substring(m.range.last + 1).trim()
-            original = original.replace(Regex("^\\W*(ok|ei|e aí|e ai|oi)?\\W*(jarvis|jarbas|jarvas)\\W*(por favor)?\\W*", RegexOption.IGNORE_CASE), "").trim()
+            original = original.replace(Regex("^\\W*(ok|ei|e aí|e ai|oi)?\\W*(jarvis|jarbas|jarvas|jervis|jerves|jarves|javis|jarvi|jarviz|jarbes|gervis|jarvez)\\W*(por favor)?\\W*", RegexOption.IGNORE_CASE), "").trim()
             if (t2.isEmpty()) return "Às suas ordens, senhor."
         }
         rapido(ctx, t2, original)?.let { return it }
@@ -164,7 +164,9 @@ object Comandos {
         }
 
         // Tempo
-        if (t.contains("vai chover") || t.contains("previsao") || t.contains("como esta o tempo") || t.contains("como ta o tempo") ||
+        // Teste 02/11: o Whisper ouviu "qual a privusão do tempo": "previsão" aceita erros e "… do tempo"/"o tempo" basta.
+        if (t.contains("vai chover") || Regex("pr[ei]v[iuoe]s[aã]o").containsMatchIn(t) || t.contains("como esta o tempo") ||
+            t.contains("como ta o tempo") || Regex("\\b(d?o) tempo\\b").containsMatchIn(t) ||
             t == "tempo" || t == "clima" || t.contains("temperatura")) {
             Rede.emSegundoPlano("clima") { Clima.atualizar(ctx) }
             return Clima.texto()

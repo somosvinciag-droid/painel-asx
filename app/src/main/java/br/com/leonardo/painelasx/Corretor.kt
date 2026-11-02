@@ -59,7 +59,7 @@ object Corretor {
         if (texto.isEmpty()) return texto
         // "Jarvis, …": corrige só o que vem depois do nome.
         var prefixo = ""
-        Regex("^\\W*((ok|ei|e aí|e ai|oi)\\W+)?(jarvis|jarbas|jarvas|jervis|javis|jarves|jarvi)\\b\\W*(por favor\\W*)?", RegexOption.IGNORE_CASE)
+        Regex("^\\W*((ok|ei|e aí|e ai|oi)\\W+)?(jarvis|jarbas|jarvas|jervis|jerves|jarves|javis|jarvi|jarviz|jarbes|gervis|jarvez)\\b\\W*(por favor\\W*)?", RegexOption.IGNORE_CASE)
             .find(texto)?.let { m ->
                 prefixo = "Jarvis, "
                 texto = texto.substring(m.range.last + 1).trim()
