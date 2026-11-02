@@ -32,3 +32,11 @@ a central como "receptor de Android Auto". Risco: o Google pode deixar de aceit�
 ## sherpa-onnx
 
 `app/src/main/java/com/k2fsa/sherpa/onnx/`: Apache License 2.0 (projeto k2-fsa/sherpa-onnx).
+
+## scrcpy (servidor do canal pelo cabo)
+
+`app/canal-servidor/src/br/com/leonardo/painelasx/canal/servidor/Ajustes.java`, `ContextoFalso.java` e
+`MicAndroid.java` adaptam `Workarounds.java`, `FakeContext.java` e `AudioDirectCapture.java` do scrcpy
+(https://github.com/Genymobile/scrcpy), Copyright (C) 2018 Genymobile e Copyright (C) 2018-2026 Romain Vimont,
+Apache License 2.0. O cliente ADB (`app/src/main/java/br/com/leonardo/painelasx/canal/AdbUsb.kt`) foi escrito a
+partir da documentação do protocolo do AOSP (`system/core/adb/protocol.txt`, Apache License 2.0).

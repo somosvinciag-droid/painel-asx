@@ -27,9 +27,14 @@ object Arquivo {
         }
     }
 
+    /** Maior download que passa pela internet do celular pelo cabo (dados móveis). O APK do app (~1 MB) passa. */
+    const val MAX_PELO_CELULAR = 20L * 1024 * 1024
+
     /**
      * Baixa continuando de onde parou (a internet do celular por Bluetooth pode cair no meio).
      * Só troca o ".parte" pelo arquivo de verdade quando o tamanho bate com o que o servidor disse.
+     * Se os pedidos do app estão indo pelo celular pelo cabo (canal ADB, sem outra internet na central), arquivos
+     * maiores que [MAX_PELO_CELULAR] (ouvido, voz) NÃO baixam: esperam outra internet (Wi-Fi/ancoragem).
      */
     fun baixar(url: String, destino: File, progresso: (Int) -> Unit = {}) {
         val tmp = File(destino.parentFile, destino.name + ".parte")
@@ -69,6 +74,9 @@ object Arquivo {
                         ?: if (resto > 0) ja + resto else -1L
                     else -> resto
                 }
+                val peloCelular = br.com.leonardo.painelasx.canal.ProxyDoApp.emUso()
+                if (peloCelular && total > MAX_PELO_CELULAR)
+                    throw Exception("${destino.name} tem ${total / 1048576} MB: espero outra internet para não gastar os dados do celular")
                 RandomAccessFile(tmp, "rw").use { raf ->
                     if (continuar) raf.seek(ja) else raf.setLength(0)
                     var feito = if (continuar) ja else 0L
@@ -79,6 +87,8 @@ object Arquivo {
                             while (true) {
                                 val n = i.read(buf); if (n < 0) break
                                 raf.write(buf, 0, n); feito += n
+                                if (peloCelular && total <= 0 && feito > MAX_PELO_CELULAR)
+                                    throw Exception("${destino.name} passou de ${MAX_PELO_CELULAR / 1048576} MB pelos dados do celular; continuo com outra internet")
                                 if (total > 0) {
                                     val pct = (feito * 100 / total).toInt()
                                     if (pct != ultimo) { ultimo = pct; progresso(pct) }

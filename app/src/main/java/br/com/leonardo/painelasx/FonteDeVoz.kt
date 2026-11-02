@@ -9,8 +9,8 @@ package br.com.leonardo.painelasx
  *    o celular ouve com o microfone dele e manda o texto.
  *  - Sem fonte de fora (ou com o Android Auto ligado pelo cabo): o Ouvido próprio da central (Whisper).
  *
- * Ponto de encaixe para depois: um canal paralelo no MESMO cabo do Android Auto (provavelmente ADB, ainda a decidir com
- * o Leonardo) que traga o microfone do celular para o Jarvis. Basta implementar esta interface e pôr em [FontesDeVoz.todas].
+ * Canal paralelo no MESMO cabo do Android Auto (ADB, [CanalDoCabo]): NÃO é uma fonte daqui. Ele só troca de onde vêm
+ * as amostras do Ouvido próprio (microfone do celular em vez do da central); o Whisper continua na central.
  * O "Ok Google" do próprio celular (microfone do celular pelo truque "central sem microfone / moto") é outra coisa:
  * fica opcional, no celular, e NÃO passa por aqui.
  */

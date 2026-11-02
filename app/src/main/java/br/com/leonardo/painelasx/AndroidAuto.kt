@@ -350,6 +350,16 @@ object AndroidAuto {
         try {
             val m = MediaSession(ctx, "PainelASX-AndroidAuto")
             m.setCallback(object : MediaSession.Callback() {
+                // Diagnóstico do volante (01/11: "não está funcionando tão bem"): anota cada tecla que chega aqui.
+                override fun onMediaButtonEvent(i: android.content.Intent): Boolean {
+                    try {
+                        @Suppress("DEPRECATION")
+                        val k = i.getParcelableExtra<android.view.KeyEvent>(android.content.Intent.EXTRA_KEY_EVENT)
+                        if (k != null && k.action == android.view.KeyEvent.ACTION_DOWN)
+                            Registro.anotar("aa: tecla de mídia ${android.view.KeyEvent.keyCodeToString(k.keyCode)} (volante/sistema)")
+                    } catch (_: Throwable) { }
+                    return super.onMediaButtonEvent(i)
+                }
                 override fun onPlay() { tecla(Aa.TECLA_PLAY) }
                 override fun onPause() { tecla(Aa.TECLA_PAUSA) }
                 override fun onStop() { tecla(Aa.TECLA_PAUSA) }

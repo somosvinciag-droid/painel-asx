@@ -8,3 +8,5 @@ local.properties
 .idea/
 *.p12
 assinatura/
+# servidor do canal pelo cabo: montado pelo GitHub Actions (app/canal-servidor/montar.sh)
+app/src/main/assets/canal-servidor.jar
