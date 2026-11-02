@@ -520,6 +520,14 @@ object CaboUsb {
 
     private fun ehAcessorio(d: UsbDevice) = d.vendorId == GOOGLE && d.productId in PIDS_ACESSORIO
 
+    /** A central dá permissão USB a qualquer app sem diálogo (config_disableUsbPermissionDialogs = true nesta NWD). */
+    private val semDialogoUsb: Boolean by lazy {
+        try {
+            val id = android.content.res.Resources.getSystem().getIdentifier("config_disableUsbPermissionDialogs", "bool", "android")
+            id != 0 && android.content.res.Resources.getSystem().getBoolean(id)
+        } catch (_: Throwable) { false }
+    }
+
     /** O celular está no cabo e o modo é "Android Auto pelo Painel" (a música vem pelo AA, não pela Música BT). */
     fun celularNoCabo(ctx: Context): Boolean = try {
         modo(ctx) == MODO_AA && (ctx.getSystemService(Context.USB_SERVICE) as UsbManager).deviceList.values
@@ -574,6 +582,9 @@ object CaboUsb {
         if ((origem == REVER || origem == REVER_TARDE || origem == DE_NOVO) && um.deviceList.values.none { it.deviceName == d.deviceName }) return
         if (!um.hasPermission(d)) {
             when {
+                // Esta central não mostra diálogo de permissão USB (config_disableUsbPermissionDialogs): na partida com o
+                // cabo já plugado, pede na hora (antes esperava até 17 s pelo "Abrir com" que nunca aparece).
+                origem == PROCURA && semDialogoUsb -> pedirPermissao(ctx, um, d)
                 // Com o "usar por padrão" marcado, o Android dá a permissão e abre a CaboActivity logo depois deste
                 // aviso. Pedir agora mostraria o diálogo à toa: confere de novo em 1,5 s.
                 origem == AVISO || origem == SISTEMA || origem == PROCURA -> Rede.principal.postDelayed({ tratar(ctx, d, REVER) }, 1_500)
@@ -599,6 +610,14 @@ object CaboUsb {
         val p = if (aa) plugadaAtual() else null
         if (p != null && p.desistiu) { alheios.add(d.deviceName); return }   // desistiu nesta plugada: parado até soltar
         if (p != null && !ehAcessorio(d)) p.viuNormal = true
+        // Partida (ou o app voltou) com o celular JÁ em modo acessório: é o acessório da conversa velha (antes de a central
+        // dormir) ou o do ZLink. Reabrir leria bytes velhos: reinicia o USB e o celular volta do zero (pedido novo do AA).
+        if (aa && origem == PROCURA && ehAcessorio(d) && !AndroidAuto.ligado) {
+            if (reiniciarUsb(um, d)) {
+                Registro.anotar("cabo USB: na partida o celular já estava no cabo (modo acessório antigo); reiniciei o USB dele")
+                return
+            }
+        }
         val trocar = when {
             !ehAcessorio(d) -> true
             p == null -> false
