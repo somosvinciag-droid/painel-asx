@@ -17,6 +17,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
+      - name: Servidor do canal pelo cabo (dex para o celular)
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! bash app/canal-servidor/montar.sh app/canal-servidor/src app/src/main/assets/canal-servidor.jar 2>&1 | tee servidor-canal.log; then
+            ERROS=$(grep -v '^ *$' servidor-canal.log | tail -40 | sed 's/%/%25/g' | tr '\n' '\r' | sed 's/\r/%0A/g')
+            echo "::error title=Servidor do canal falhou::${ERROS}"
+            exit 1
+          fi
       - name: Compilar (central e celular)
         shell: bash
         run: |

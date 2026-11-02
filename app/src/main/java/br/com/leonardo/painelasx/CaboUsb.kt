@@ -112,8 +112,40 @@ class CanalAoa(
         if (fechado) return
         fechado = true
         try { con.releaseInterface(intf) } catch (_: Exception) { }
-        try { con.close() } catch (_: Exception) { }
+        // A conexão é dividida com o canal ADB (mesmo aparelho): só fecha quando ninguém mais usa.
+        ConexoesUsb.soltar(nomeAparelho, con)
     }
+}
+
+/**
+ * UMA UsbDeviceConnection por aparelho, dividida entre o receptor do Android Auto (interface do acessório) e o canal
+ * ADB (interface 0xFF/0x42/0x01) do celular 18d1:2d01. Cada parte reivindica só a SUA interface; a conexão só fecha
+ * quando a última parte solta. (Fechar enquanto a outra parte ainda lê no mesmo descritor seria perigoso.)
+ */
+object ConexoesUsb {
+    private class Uso(val con: UsbDeviceConnection) { var vezes = 0 }
+    private val usos = HashMap<String, Uso>()
+
+    /** A conexão do aparelho (abre se ninguém abriu). Toda chamada que devolve não-null precisa de um [soltar]. */
+    @Synchronized
+    fun pegar(um: UsbManager, d: UsbDevice): UsbDeviceConnection? {
+        usos[d.deviceName]?.let { it.vezes++; return it.con }
+        val c = try { um.openDevice(d) } catch (_: Exception) { null } ?: return null
+        usos[d.deviceName] = Uso(c).also { it.vezes = 1 }
+        return c
+    }
+
+    @Synchronized
+    fun soltar(nome: String, c: UsbDeviceConnection) {
+        val u = usos[nome]
+        if (u == null || u.con !== c) { try { c.close() } catch (_: Exception) { }; return }
+        if (--u.vezes > 0) return
+        usos.remove(nome)
+        try { c.close() } catch (_: Exception) { }
+    }
+
+    @Synchronized
+    fun quantas(nome: String): Int = usos[nome]?.vezes ?: 0
 }
 
 /**
@@ -255,6 +287,7 @@ object CaboUsb {
         val antes = modo(ctx)
         CaboCelular.prefs(ctx).edit().putString("cabo_modo", m).putInt("cabo_pedidos", 0).apply()
         if (antes == MODO_AA && m != MODO_AA) AndroidAuto.parar("modo do cabo mudou")
+        if (m == MODO_ZLINK) CanalDoCabo.parar()
         val painel = m != MODO_ZLINK
         aviso = ""
         synchronized(this) { alheios.clear(); tentativas.clear(); trocarDeNovo.clear(); plugada = null }
@@ -348,6 +381,7 @@ object CaboUsb {
             Registro.anotar("cabo USB: soltou ${hex(d)} ${d.deviceName}" + (desde?.let { " (ficou ${(SystemClock.elapsedRealtime() - it) / 100 / 10.0} s)" } ?: ""))
         CaboCelular.soltouCabo(d.deviceName)
         AndroidAuto.soltouCabo(d.deviceName)
+        CanalDoCabo.soltou(d.deviceName)
         linha.postDelayed({ talvezFimDaPlugada(ctx) }, FIM_EPISODIO_MS)
     }
 
@@ -647,6 +681,9 @@ object CaboUsb {
                         Registro.anotar("cabo USB: canal aberto com o celular (${d.productName ?: hex(d)}) para o " + if (aa) "Android Auto" else "app do celular")
                         if (aa) AndroidAuto.entregarCabo(ctx, canal) else CaboCelular.entregarCabo(canal)
                     } else Registro.anotar("cabo USB: não abri o acessório (outro app, como o ZLink, pegou antes?)")
+                    // Canal paralelo pelo MESMO cabo (interface ADB do 18d1:2d01): microfone e internet do celular.
+                    // Começa um pouco depois, numa linha própria (o Android Auto passa primeiro).
+                    if (ehAcessorio(d)) CanalDoCabo.plugou(ctx, um, d)
                 }
             } catch (e: Exception) {
                 Registro.anotar("ERRO cabo USB: ${e.javaClass.simpleName}: ${e.message}")
@@ -714,7 +751,7 @@ object CaboUsb {
         }
     }
 
-    /** 18d1:2d00/2d01 -> os dois pontos "bulk" da interface 0 (a do ADB nunca é usada). */
+    /** 18d1:2d00/2d01 -> os dois pontos "bulk" da interface 0 (a do ADB é do [CanalDoCabo]). */
     private fun abrir(um: UsbManager, d: UsbDevice): CanalAoa? {
         val intf = (0 until d.interfaceCount).map { d.getInterface(it) }
             .firstOrNull { it.interfaceSubclass != 0x42 && it.endpointCount >= 2 } ?: return null
@@ -727,9 +764,10 @@ object CaboUsb {
             if (e.direction == UsbConstants.USB_DIR_OUT && sai == null) sai = e
         }
         if (ent == null || sai == null) return null
-        val c = um.openDevice(d) ?: return null
+        // A conexão é a mesma do canal ADB, se ele já abriu este aparelho (cada um reivindica só a sua interface).
+        val c = ConexoesUsb.pegar(um, d) ?: return null
         // Primeiro sem forçar (não toma o cabo de outro app à força); só força se não houver dono.
-        if (!c.claimInterface(intf, false) && !c.claimInterface(intf, true)) { c.close(); return null }
+        if (!c.claimInterface(intf, false) && !c.claimInterface(intf, true)) { ConexoesUsb.soltar(d.deviceName, c); return null }
         return CanalAoa(c, intf, ent, sai, d.deviceName)
     }
 

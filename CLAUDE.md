@@ -407,3 +407,38 @@ Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica
   abrir, ela manda para a tela de fábrica), filtro HOME tirado, tela inicial devolvida à de fábrica uma vez
   (`Painel.devolverTelaInicial`). O FALAR (`Painel.abrir(ouvir = true)`) abre a MainActivity. Sem botão PAINEL no AA.
 - Próximo (depois de o AA funcionar direito): personalizar.
+
+## Canal pelo cabo (ADB): microfone e internet do celular (ramo `rascunho-canal`)
+- Pedido do Leonardo: o Jarvis ouve pelo microfone do CELULAR pelo MESMO cabo do Android Auto. Só cabo, sem Bluetooth.
+- Como: com a "Depuração USB" ligada, o celular no modo acessório vira 18d1:2d01 (interface 0 = acessório do AA,
+  interface 0xFF/0x42/0x01 = ADB). `ConexoesUsb` (CaboUsb.kt) dá UMA `UsbDeviceConnection` por aparelho, dividida
+  (contagem de usos) entre o `CanalAoa` e o canal ADB; cada um reivindica só a sua interface. Sem ADB (2d00): canal
+  desligado, AA igual.
+- Código: `canal/AdbUsb.kt` (cliente ADB: CNXN/AUTH RSA, OPEN/WRTE/OKAY, sync push, exec; o MESMO usado pelo
+  `zlink/DesligarZlink` por TCP; `TransporteUsb` lê 1 pacote USB por vez com prazo de 1 s), `canal/CanalParalelo.kt`
+  (`CanalParalelo`, `MicrofoneRemoto`, `ProxyLocal`, `ProxyDoApp`, `CanalCabo` = laço de plugada sem Context) e
+  `CanalDoCabo.kt` (cola com a central). Chave da central: `noBackupFilesDir/adb/chave_central.pk8` (fora do backup).
+- Servidor no celular: `app/canal-servidor/src` (Java, roda como usuário shell via `app_process`, igual ao scrcpy;
+  Apache-2.0 no NOTICE). `app/canal-servidor/montar.sh` (javac + d8) gera `app/src/main/assets/canal-servidor.jar`
+  (no .gitignore) num passo do `montar.yml` e do `conferir.yml` antes do Gradle. A central manda o .jar por `sync:`
+  só quando muda (versão = sha-256), inicia com `exec:`, fala por `localabstract:painelasx-canal`
+  (`PING`, `MIC fonte taxa` → PCM 16 kHz mono, `NET host porta` → túnel TCP). Cabo solto = o servidor sai sozinho.
+- Fluxo: CaboUsb abre o acessório → `CanalDoCabo.plugou` (1,5 s depois, linha `canal-cabo`) → ADB (1ª vez: "Permitir
+  depuração USB?" no celular + voz "Toque em Permitir…") → `settings put global adb_allowed_connection_time 0` (uma vez
+  por celular: a autorização não expira em 7 dias) → servidor → proxy. PING de 20 em 20 s. Máx. 5 tentativas por
+  plugada; sem "Permitir" em 2 min = parado até soltar o cabo (reabrir do AA no mesmo aparelho não pergunta de novo).
+- Ouvido: `gravar` lê do `CanalDoCabo.microfone()` quando ligado (rótulo "OUVINDO (MIC CEL)"); erro no meio = segue
+  com o microfone da central ("canal: o microfone do celular parou…"); celular mandando silêncio puro = central por 10 min.
+- Internet: `ProxyDoApp` (ProxySelector só deste app) manda os HttpURLConnection pelo celular SÓ quando a central não
+  tem rede com internet conferida (VALIDATED). Não é VPN (Spotify/rádio não passam). `Arquivo.baixar` recusa > 20 MB
+  pelo celular (ouvido, voz esperam outra internet); o APK (~1 MB) passa.
+- Conector: `canal: {estado, modelo, internet_pelo_celular, proxy_porta, ultimo_erro, microfone}`; diagnóstico
+  "--- canal pelo cabo ---" (estado + linhas "canal:" do registro).
+- O que o Leonardo faz UMA vez no celular: Configurações → Sobre o telefone → tocar 7× em "Versão do SO"; Configurações
+  adicionais → Opções do desenvolvedor → "Depuração USB" ligada; na 1ª plugada no carro, marcar "Sempre permitir deste
+  computador" e Permitir.
+- Riscos: apps de banco podem reclamar das Opções do desenvolvedor ligadas (BMG/Caixa Tem documentam); HyperOS NÃO
+  confirmado (se dá o 2d01 com o AA, se deixa o shell gravar o microfone com a tela bloqueada, se aceita o `settings
+  put`, se desliga a depuração depois de atualizar); o Android mostra o ponto verde "Shell usando o microfone".
+- Testes JVM (fora do repo): `scratchpad/canal-integra/teste/rodar.sh` (vetores + adb de verdade + celular falso +
+  cabo USB falso + CanalCabo; 16 + 7 + 20 + 32).

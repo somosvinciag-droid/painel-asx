@@ -76,7 +76,10 @@ object Adb {
     fun nome(c: Int): String = String(byteArrayOf(c.toByte(), (c shr 8).toByte(), (c shr 16).toByte(), (c shr 24).toByte()), Charsets.US_ASCII)
 }
 
-class AdbErro(msg: String) : IOException(msg)
+open class AdbErro(msg: String) : IOException(msg)
+
+/** Ninguém tocou em "Permitir" no celular dentro do prazo: não adianta tentar de novo nesta plugada. */
+class AdbSemPermissao(msg: String) : AdbErro(msg)
 
 /** Uma mensagem ADB: cabeçalho de 24 bytes (little-endian) + dados. */
 class AdbMensagem(val comando: Int, val arg0: Int, val arg1: Int, val dados: ByteArray = VAZIO) {
@@ -164,20 +167,33 @@ class TransporteStream(private val entrada: InputStream, private val saida: Outp
 /**
  * Transporte pelo cabo: interface ADB (classe 0xFF, subclasse 0x42, protocolo 0x01) com dois pontos "bulk".
  * No modo acessório com depuração (18d1:2d01) ela é a SEGUNDA interface; a primeira é do acessório (Android Auto).
- * Cada uma é "reivindicada" separadamente, então o receptor do Android Auto e este canal não brigam.
+ * Cada uma é "reivindicada" separadamente na MESMA UsbDeviceConnection (um dono só do aparelho, ver
+ * `ConexoesUsb` no CaboUsb): o receptor do Android Auto e este canal não brigam.
+ *
+ * Leitura: um pacote USB por vez (tamanho do pacote, 512 bytes no USB 2.0) com prazo de [ESPERA_MS]. Assim
+ *  - nada se perde quando o prazo acaba no meio de uma transferência (um pacote chega inteiro ou não chega);
+ *  - a linha de leitura percebe o [close] em até 1 s (com prazo 0 ela ficaria presa para sempre e poderia
+ *    roubar os dados da conexão seguinte).
+ * Erro na hora (sem esperar o prazo) várias vezes seguidas = cabo solto.
  */
-class TransporteUsb private constructor(
+class TransporteUsb(
     private val con: UsbDeviceConnection,
     private val intf: UsbInterface,
     private val entra: UsbEndpoint,
     private val sai: UsbEndpoint,
-    private val fecharConexao: Boolean,
+    /** Devolve a conexão (compartilhada: só diminui a contagem; própria: fecha). */
+    private val soltar: () -> Unit,
 ) : AdbTransporte {
 
-    private val tmp = ByteArray(BLOCO)
+    @Volatile private var fechado = false
+    private val pacote = entra.maxPacketSize.let { if (it in 8..65536) it else 512 }
+    private val buf = ByteArray(pacote)
+    private var ini = 0
+    private var fim = 0
 
     override fun escreverMensagem(m: AdbMensagem) {
         synchronized(this) {
+            if (fechado) throw AdbErro("cabo: fechado")
             val cab = m.cabecalho()
             enviar(cab, 0, cab.size)                 // cabeçalho numa transferência (como o adb do PC)
             if (m.dados.isNotEmpty()) enviar(m.dados, 0, m.dados.size)
@@ -185,51 +201,59 @@ class TransporteUsb private constructor(
     }
 
     private fun enviar(b: ByteArray, off: Int, len: Int) {
-        // Android 9+ aceita transferências maiores que 16 KB; mandar o bloco inteiro de uma vez evita
-        // pacotes de tamanho zero no meio dos dados.
+        // Android 9+ aceita transferências maiores que 16 KB: o bloco inteiro de uma vez (sem pacote curto no meio).
         var p = 0
         while (p < len) {
-            val n = con.bulkTransfer(sai, b, off + p, len - p, TEMPO_ESCRITA_MS)
-            if (n < 0) throw AdbErro("cabo: escrita falhou")
+            val n = try { con.bulkTransfer(sai, b, off + p, len - p, TEMPO_ESCRITA_MS) } catch (_: Exception) { -1 }
+            if (n < 0 || fechado) throw AdbErro("cabo: escrita falhou")
             p += n
         }
         // Pacote de tamanho zero quando o tamanho é múltiplo do pacote USB (o adb do PC faz o mesmo:
         // usb_libusb.cpp should_perform_zero_transfer). Sem isso o adbd fica esperando mais dados.
         val mps = sai.maxPacketSize
-        if (len > 0 && mps > 0 && len % mps == 0) con.bulkTransfer(sai, b, off, 0, TEMPO_ESCRITA_MS)
+        if (len > 0 && mps > 0 && len % mps == 0) try { con.bulkTransfer(sai, b, off, 0, TEMPO_ESCRITA_MS) } catch (_: Exception) { }
     }
 
     override fun ler(b: ByteArray, off: Int, len: Int) {
         var p = 0
+        var errosNaHora = 0
         while (p < len) {
-            val pedir = minOf(BLOCO, len - p)
-            val n = con.bulkTransfer(entra, tmp, 0, pedir, 0)    // 0 = espera; solta com erro se o cabo sair
-            if (n < 0) throw AdbErro("cabo: leitura falhou (desplugado?)")
-            if (n == 0) continue                                // pacote de tamanho zero: ignora
-            System.arraycopy(tmp, 0, b, off + p, n)
-            p += n
+            if (ini < fim) {
+                val n = minOf(fim - ini, len - p)
+                System.arraycopy(buf, ini, b, off + p, n)
+                ini += n; p += n
+                continue
+            }
+            if (fechado) throw AdbErro("cabo: fechado")
+            val t0 = System.nanoTime()
+            val n = try { con.bulkTransfer(entra, buf, 0, buf.size, ESPERA_MS) } catch (_: Exception) { -1 }
+            if (fechado) throw AdbErro("cabo: fechado")
+            if (n > 0) { ini = 0; fim = n; errosNaHora = 0; continue }
+            if (n == 0) continue                                    // pacote de tamanho zero: ignora
+            // -1: o prazo acabou sem nada (normal: o ADB não tem "ping") ou erro do USB (quando volta na hora).
+            if ((System.nanoTime() - t0) / 1_000_000 < ESPERA_MS / 2) {
+                if (++errosNaHora >= 20) throw AdbErro("cabo: leitura falhou (desplugado?)")
+                try { Thread.sleep(50) } catch (_: InterruptedException) { }
+            } else errosNaHora = 0
         }
     }
 
     override fun close() {
+        if (fechado) return
+        fechado = true
         try { con.releaseInterface(intf) } catch (_: Exception) { }
-        if (fecharConexao) try { con.close() } catch (_: Exception) { }
+        try { soltar() } catch (_: Exception) { }
     }
 
     companion object {
-        private const val BLOCO = 16384
+        const val ESPERA_MS = 1000
         private const val TEMPO_ESCRITA_MS = 5000
 
         fun acharInterface(d: UsbDevice): UsbInterface? = (0 until d.interfaceCount).map { d.getInterface(it) }
             .firstOrNull { it.interfaceClass == Adb.CLASSE && it.interfaceSubclass == Adb.SUBCLASSE && it.interfaceProtocol == Adb.PROTOCOLO }
 
-        /**
-         * Abre a interface ADB. [conexao]: a mesma UsbDeviceConnection do receptor do Android Auto (recomendado:
-         * um dono só do aparelho); se null, abre uma conexão própria (o Linux também deixa: cada arquivo do
-         * usbfs reivindica interfaces diferentes).
-         */
-        fun abrir(um: UsbManager, d: UsbDevice, conexao: UsbDeviceConnection? = null): TransporteUsb? {
-            val intf = acharInterface(d) ?: return null
+        /** Os dois pontos "bulk" (entrada, saída) da interface, ou null. */
+        fun pontos(intf: UsbInterface): Pair<UsbEndpoint, UsbEndpoint>? {
             var ent: UsbEndpoint? = null
             var sai: UsbEndpoint? = null
             for (i in 0 until intf.endpointCount) {
@@ -238,10 +262,27 @@ class TransporteUsb private constructor(
                 if (e.direction == UsbConstants.USB_DIR_IN && ent == null) ent = e
                 if (e.direction == UsbConstants.USB_DIR_OUT && sai == null) sai = e
             }
-            if (ent == null || sai == null) return null
-            val c = conexao ?: um.openDevice(d) ?: return null
-            if (!c.claimInterface(intf, true)) { if (conexao == null) c.close(); return null }
-            return TransporteUsb(c, intf, ent, sai, fecharConexao = conexao == null)
+            return if (ent != null && sai != null) ent to sai else null
+        }
+
+        /**
+         * Abre a interface ADB na [conexao] (a MESMA UsbDeviceConnection do receptor do Android Auto). [soltar] é
+         * chamado no [close] (e aqui mesmo, se não der para abrir). Devolve null se o aparelho não tem ADB ou
+         * se a interface não pôde ser reivindicada.
+         */
+        fun abrir(d: UsbDevice, conexao: UsbDeviceConnection, soltar: () -> Unit): TransporteUsb? {
+            val intf = acharInterface(d)
+            val pp = intf?.let { pontos(it) }
+            if (intf == null || pp == null) { soltar(); return null }
+            // Primeiro sem forçar (não toma a interface de outro app); só força se não houver dono.
+            if (!conexao.claimInterface(intf, false) && !conexao.claimInterface(intf, true)) { soltar(); return null }
+            return TransporteUsb(conexao, intf, pp.first, pp.second, soltar)
+        }
+
+        /** Abre com uma conexão própria (fecha no [close]). */
+        fun abrir(um: UsbManager, d: UsbDevice): TransporteUsb? {
+            val c = um.openDevice(d) ?: return null
+            return abrir(d, c) { try { c.close() } catch (_: Exception) { } }
         }
     }
 }
@@ -486,7 +527,10 @@ class AdbConexao private constructor(private val t: AdbTransporte, val versao: I
             val leitura = LeitorComPrazo(t)
             while (true) {
                 val prazo = if (mandouChave) esperaPermissaoMs else 15_000L
-                val m = leitura.ler(prazo) ?: run { t.close(); throw AdbErro(if (mandouChave) "ninguém tocou em Permitir no celular" else "o celular não respondeu ao ADB") }
+                val m = leitura.ler(prazo) ?: run {
+                    t.close()
+                    throw if (mandouChave) AdbSemPermissao("ninguém tocou em Permitir no celular") else AdbErro("o celular não respondeu ao ADB")
+                }
                 when (m.comando) {
                     Adb.CNXN -> {
                         val ban = String(m.dados, Charsets.UTF_8).trimEnd('\u0000')

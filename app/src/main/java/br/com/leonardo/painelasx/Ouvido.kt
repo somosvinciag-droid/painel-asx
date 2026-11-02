@@ -372,26 +372,23 @@ object Ouvido {
         try { am.requestAudioFocus(foco) } catch (_: Exception) { }
         try {
             bipe()
-            val taxa = 16000
-            val min = AudioRecord.getMinBufferSize(taxa, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-            var ar = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, taxa,
-                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, taxa * 2))
-            if (ar.state != AudioRecord.STATE_INITIALIZED) {
-                ar.release()
-                ar = AudioRecord(MediaRecorder.AudioSource.MIC, taxa,
-                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, taxa * 2))
-            }
-            if (ar.state != AudioRecord.STATE_INITIALIZED) { ar.release(); throw Exception("microfone não abriu") }
+            // Microfone do CELULAR pelo cabo (canal ADB, ver CanalDoCabo), quando ligado; senão o da central.
+            // Mesmo formato (16 kHz, mono, 16 bits): bipe, VAD e limites iguais.
+            var remoto: br.com.leonardo.painelasx.canal.MicrofoneRemoto? =
+                if (SystemClock.elapsedRealtime() < celularMudoAte) null else CanalDoCabo.microfone()
+            var ar: AudioRecord? = null
             val todo = ArrayList<FloatArray>()
             var comecou = false
             var maior = 0f
             var amostras = 0          // quantas amostras já gravou
             var inicioFala = -1       // amostra em que a VAD percebeu a fala
             try {
-                ar.startRecording()
-                if (ar.recordingState != AudioRecord.RECORDSTATE_RECORDING) throw Exception("microfone ocupado")
+                if (remoto == null) ar = abrirMicCentral()
+                CanalDoCabo.ultimoMic = if (remoto != null) "celular" else "central"
+                if (remoto != null) Registro.anotar("canal: microfone do celular")
+                val rotulo = if (remoto != null) " (MIC CEL)" else ""
                 v.reset()
-                etapa("OUVINDO")
+                etapa("OUVINDO$rotulo")
                 val inicio = SystemClock.elapsedRealtime()
                 var ultimaFala = inicio
                 val pedaco = ShortArray(512)
@@ -399,7 +396,18 @@ object Ouvido {
                 val janela = FloatArray(512)
                 var naJanela = 0
                 while (true) {
-                    val n = ar.read(pedaco, 0, pedaco.size)
+                    val r = remoto
+                    var n = if (r != null) (try { r.ler(pedaco, 500) } catch (_: Exception) { -1 }) else ar!!.read(pedaco, 0, pedaco.size)
+                    if (r != null && n < 0) {
+                        // O celular parou no meio (cabo solto, servidor caiu): segue com o microfone da central.
+                        Registro.anotar("canal: o microfone do celular parou; sigo com o da central")
+                        try { r.close() } catch (_: Exception) { }
+                        remoto = null
+                        ar = abrirMicCentral()
+                        CanalDoCabo.ultimoMic = "central (o do celular parou)"
+                        etapa(if (comecou) "OUVINDO ●" else "OUVINDO")
+                        n = 0
+                    }
                     if (n < 0) throw Exception("microfone falhou ($n)")
                     if (n > 0) {
                         val f = FloatArray(n) { pedaco[it] / 32768f }
@@ -416,7 +424,7 @@ object Ouvido {
                     } else Thread.sleep(5)   // leitura vazia: não fica rodando sem parar
                     val agora = SystemClock.elapsedRealtime()
                     if (v.isSpeechDetected()) {
-                        if (!comecou) { comecou = true; inicioFala = amostras; etapa("OUVINDO ●") }
+                        if (!comecou) { comecou = true; inicioFala = amostras; etapa(if (remoto != null) "OUVINDO ● (MIC CEL)" else "OUVINDO ●") }
                         ultimaFala = agora
                     }
                     if (comecou && agora - ultimaFala > 900) break      // parou de falar
@@ -424,12 +432,17 @@ object Ouvido {
                     if (agora - inicio > 12_000) break                   // frase longa demais
                 }
             } finally {
-                try { ar.stop() } catch (_: Exception) { }
-                ar.release()
+                try { remoto?.close() } catch (_: Exception) { }
+                ar?.let { a -> try { a.stop() } catch (_: Exception) { }; a.release() }
                 v.clear()
             }
             pareciaMudo = maior < 0.002f
             if (pareciaMudo) Registro.anotar("ouvido: o microfone parece mudo (nível ${"%.4f".format(maior)})")
+            // Celular mandando só silêncio (o sistema dele bloqueou o microfone?): usa o da central por 10 min.
+            if (remoto != null && maior < 0.0005f) {
+                celularMudoAte = SystemClock.elapsedRealtime() + 10 * 60_000L
+                Registro.anotar("canal: o microfone do celular veio mudo; uso o da central por 10 min")
+            }
             if (!comecou) return null
             val total = todo.sumOf { it.size }
             val tudo = FloatArray(total)
@@ -443,6 +456,28 @@ object Ouvido {
         } finally {
             try { am.abandonAudioFocusRequest(foco) } catch (_: Exception) { }
         }
+    }
+
+    /** Até quando não usar o microfone do celular (ele mandou só silêncio). */
+    @Volatile private var celularMudoAte = 0L
+
+    /** Microfone da central, já gravando (VOICE_RECOGNITION; se não abrir, MIC). */
+    private fun abrirMicCentral(): AudioRecord {
+        val taxa = 16000
+        val min = AudioRecord.getMinBufferSize(taxa, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        var ar = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, taxa,
+            AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, taxa * 2))
+        if (ar.state != AudioRecord.STATE_INITIALIZED) {
+            ar.release()
+            ar = AudioRecord(MediaRecorder.AudioSource.MIC, taxa,
+                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, taxa * 2))
+        }
+        if (ar.state != AudioRecord.STATE_INITIALIZED) { ar.release(); throw Exception("microfone não abriu") }
+        try {
+            ar.startRecording()
+            if (ar.recordingState != AudioRecord.RECORDSTATE_RECORDING) throw Exception("microfone ocupado")
+        } catch (e: Throwable) { try { ar.release() } catch (_: Throwable) { }; throw e }
+        return ar
     }
 
     private fun bipe() {

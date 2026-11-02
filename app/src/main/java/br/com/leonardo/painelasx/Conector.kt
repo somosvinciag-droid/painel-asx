@@ -174,6 +174,8 @@ object Conector {
         .put("celular", Celular.estadoConector())
         // Receptor de Android Auto pelo cabo (só o estado; nada de nomes ou mensagens).
         .put("android_auto", AndroidAuto.estadoConector())
+        // Canal pelo cabo (ADB): estado, modelo do celular, de onde veio o microfone do último FALAR, internet.
+        .put("canal", CanalDoCabo.estadoConector())
 
     private fun executar(ctx: Context, c: JSONObject) {
         val id = c.optString("id")

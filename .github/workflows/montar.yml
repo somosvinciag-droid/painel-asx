@@ -37,6 +37,9 @@ jobs:
         with:
           gradle-version: "8.7"
 
+      - name: Servidor do canal pelo cabo (dex para o celular)
+        run: bash app/canal-servidor/montar.sh app/canal-servidor/src app/src/main/assets/canal-servidor.jar
+
       - name: Compilar (conferir se o codigo esta certo)
         env:
           NUMERO_VERSAO: ${{ github.run_number }}
