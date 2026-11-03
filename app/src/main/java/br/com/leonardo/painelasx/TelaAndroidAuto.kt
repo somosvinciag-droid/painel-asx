@@ -77,6 +77,15 @@ class TelaAndroidAuto : Activity(), SurfaceHolder.Callback {
         Registro.anotar("aa: tela do Android Auto aberta")
     }
 
+    /**
+     * Já aberta e o Android Auto ligou de novo (conversa nova no mesmo cabo, sem a tela fechar): a superfície continua
+     * a mesma, então o surfaceCreated não volta. Liga o decodificador à conversa nova (configuração + imagem inteira).
+     */
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        decodificador?.let { AndroidAuto.ligarVideo(it) }
+    }
+
     private fun voltarAoPainel() {
         try { startActivity(Intent(this, TelaCarro::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { }
         finish()
@@ -144,19 +153,33 @@ class TelaAndroidAuto : Activity(), SurfaceHolder.Callback {
      * H.264 por hardware direto na superfície. A linha de leitura do cabo só COPIA o quadro para a fila
      * (nunca espera o decodificador); uma linha própria entrega ao MediaCodec e mostra.
      */
-    class Decodificador(superficie: Surface, w: Int, l: Int) : AaVideoSaida {
+    class Decodificador(private val superficie: Surface, w: Int, l: Int) : AaVideoSaida {
         private class Pedaco(val b: ByteArray, val config: Boolean)
+
+        private companion object {
+            /** Quanto tempo esperar uma imagem inteira depois de perder quadros (passou: mostra o que vier). */
+            const val ESPERA_CHAVE_MS = 3_000L
+        }
 
         private val fila = ArrayBlockingQueue<Pedaco>(60)
         private val codec: MediaCodec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        private val formato = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, l).apply {
+            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 512 * 1024)
+        }
         @Volatile private var rodando = true
         @Volatile private var quadros = 0L
+        /**
+         * Depois de jogar quadros fora (fila cheia, decodificador sem vaga, reinício), os quadros seguintes dependem dos
+         * que sumiram: mostrá-los dá "borrão". Espera o próximo quadro inteiro (IDR/SPS) por até [ESPERA_CHAVE_MS]
+         * (o pedido de imagem nova vai junto); passou disso, segue como antes.
+         */
+        @Volatile private var esperandoChaveDesde = 0L
+        private var reinicios = 0
+        private var pulados = 0L
         private val linha: Thread
 
         init {
-            val f = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, l)
-            f.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 512 * 1024)
-            codec.configure(f, superficie, null, 0)
+            codec.configure(formato, superficie, null, 0)
             codec.start()
             Registro.anotar("aa: decodificador de vídeo pronto (${codec.name}, ${w}x$l)")
             linha = Thread({ laco() }, "aa-video").apply { priority = Thread.MAX_PRIORITY - 1; start() }
@@ -170,8 +193,27 @@ class TelaAndroidAuto : Activity(), SurfaceHolder.Callback {
             if (!fila.offer(Pedaco(b.copyOfRange(ini, ini + n), config))) {
                 // Atrasou demais (central ocupada): joga a fila fora e pede uma imagem inteira nova.
                 fila.clear()
-                AndroidAuto.pedirImagem()
+                esperarChave()
             }
+        }
+
+        private fun esperarChave() {
+            if (esperandoChaveDesde == 0L) esperandoChaveDesde = System.nanoTime()
+            AndroidAuto.pedirImagem()   // no máximo 1 pedido a cada 2 s (AaSessao)
+        }
+
+        /** Quadro que começa uma imagem inteira: tem SPS (7) ou IDR (5) entre os primeiros NAL. */
+        private fun ehChave(b: ByteArray): Boolean {
+            val fim = minOf(b.size - 4, 512)
+            var i = 0
+            while (i < fim) {
+                if (b[i].toInt() == 0 && b[i + 1].toInt() == 0 && b[i + 2].toInt() == 1) {
+                    val tipo = b[i + 3].toInt() and 0x1F
+                    if (tipo == 5 || tipo == 7) return true
+                    i += 3
+                } else i++
+            }
+            return false
         }
 
         private fun laco() {
@@ -180,6 +222,17 @@ class TelaAndroidAuto : Activity(), SurfaceHolder.Callback {
             while (rodando) {
                 try {
                     val p = fila.poll(20, TimeUnit.MILLISECONDS)
+                    if (p != null && !p.config && esperandoChaveDesde != 0L) {
+                        if (ehChave(p.b) || System.nanoTime() - esperandoChaveDesde > ESPERA_CHAVE_MS * 1_000_000) {
+                            if (pulados > 0) Registro.anotar("aa: vídeo voltou com imagem inteira ($pulados quadros pulados)")
+                            esperandoChaveDesde = 0L; pulados = 0
+                        } else {
+                            pulados++
+                            AndroidAuto.pedirImagem()
+                            soltarSaidas(info)
+                            continue
+                        }
+                    }
                     if (p != null) {
                         var i = -1
                         val limite = System.nanoTime() + 200_000_000L
@@ -195,16 +248,47 @@ class TelaAndroidAuto : Activity(), SurfaceHolder.Callback {
                             codec.queueInputBuffer(i, 0, n, System.nanoTime() / 1000,
                                 if (p.config) MediaCodec.BUFFER_FLAG_CODEC_CONFIG else 0)
                             if (!p.config && ++quadros == 1L) Registro.anotar("aa: primeiro quadro na tela")
+                        } else if (rodando && !p.config) {
+                            // Sem vaga no decodificador por 200 ms: este quadro se perdeu; os próximos dependem dele.
+                            fila.clear()
+                            esperarChave()
                         }
                     }
                     soltarSaidas(info)
+                    erros = 0
                 } catch (t: Throwable) {
                     if (!rodando) break
                     if (++erros <= 3) Registro.anotar("ERRO aa: decodificador: ${t.javaClass.simpleName}: ${t.message?.take(80)}")
-                    if (erros > 50) { Registro.anotar("aa: decodificador desistiu"); break }
+                    // Vários erros seguidos: o MediaCodec quebrou. Reinicia (até 3 vezes) e pede a configuração e uma
+                    // imagem inteira de novo; antes ficava parado (tela preta) copiando o vídeo à toa até fechar a tela.
+                    if (erros >= 5) {
+                        if (reinicios >= 3 || !reiniciar()) {
+                            Registro.anotar("aa: decodificador desistiu (a tela volta quando ela for aberta de novo)")
+                            rodando = false
+                            fila.clear()
+                            AndroidAuto.desligarVideo(this)
+                            break
+                        }
+                        erros = 0
+                    }
                     try { Thread.sleep(50) } catch (_: InterruptedException) { break }
                 }
             }
+        }
+
+        private fun reiniciar(): Boolean = try {
+            reinicios++
+            codec.reset()
+            codec.configure(formato, superficie, null, 0)
+            codec.start()
+            fila.clear()
+            esperandoChaveDesde = System.nanoTime()
+            Registro.anotar("aa: decodificador reiniciado (vez $reinicios)")
+            AndroidAuto.ligarVideo(this)   // manda a configuração guardada e pede uma imagem inteira
+            true
+        } catch (t: Throwable) {
+            Registro.anotar("ERRO aa: não reiniciei o decodificador: ${t.javaClass.simpleName}")
+            false
         }
 
         private fun soltarSaidas(info: MediaCodec.BufferInfo) {
