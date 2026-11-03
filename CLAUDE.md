@@ -516,3 +516,18 @@ Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica
   (`ServicoFixo.olharControle`) agora É iniciado, mas o aviso "Controle desligado → Religar" só aparece depois de uma
   ATUALIZAÇÃO (pref `config/controle_versao` = VERSION_CODE da última vez com o Controle ligado; soneca/partida com a
   mesma versão fica calada, como manda o CLAUDE.md).
+
+## v37 (03/11): canal do microfone DESLIGADO por padrão
+- Teste no carro 03/11 15:45–15:57 (v36, Depuração USB ligada): o Android Auto caía a cada 10–40 s, SEMPRE enquanto o
+  canal ADB conectava/esperava o "Permitir"/reiniciava ("canal: servidor do celular sem resposta; reiniciando" e 3 s
+  depois "aa: cabeçalho impossível… bytes perdidos no cabo"; também "cabo solto" com "espera falhou" no meio).
+  Ontem (sem canal) o AA aguentou a viagem. Confirma a suspeita da revisão da noite (ADB síncrono com prazo de 1 s na
+  MESMA conexão do AA no controlador musb-hdrc).
+- `CanalDoCabo.plugou` só faz algo com a pref `config/canal_ligado = true` (padrão false). Sem ela, nada fala ADB: o
+  celular não pergunta "Permitir depuração USB" e o Jarvis usa o microfone da central.
+- Antes de religar: refazer o canal com leitura ADB assíncrona (UsbRequest, uma linha única que colhe os pedidos das
+  duas interfaces) e testar no carro com o AA rodando por vários minutos.
+- No teste o CanService MANDOU carInfo com o carro andando (vel=5/4/0) e o resto inválido (255/-1): algo fala CAN
+  (velocidade), sem combustível/portas/RPM. Investigar depois.
+- Problema do dia (não é código): o Redmi chegou "travado" no modo acessório (2d01 no boot) e ficou caindo e voltando a
+  cada 1–3 s em qualquer modo USB; reiniciar o CELULAR resolveu.

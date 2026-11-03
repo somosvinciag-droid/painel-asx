@@ -44,8 +44,24 @@ object CanalDoCabo {
     }
 
     /** O celular (acessório) foi aberto pelo CaboUsb. */
+    /**
+     * v37: canal DESLIGADO por padrão. Teste de 03/11 15:45–15:57: com a Depuração USB ligada, o Android Auto caía a
+     * cada 10–40 s sempre enquanto o canal ADB conectava/reiniciava ("cabeçalho impossível… bytes perdidos no cabo" 3 s
+     * depois de "servidor do celular sem resposta; reiniciando"). Até o canal ser refeito (leituras ADB assíncronas),
+     * ele só liga com a pref config/canal_ligado = true.
+     */
+    fun ligado(ctx: Context) = try {
+        ctx.getSharedPreferences("config", Context.MODE_PRIVATE).getBoolean("canal_ligado", false)
+    } catch (_: Throwable) { false }
+
+    @Volatile private var avisouDesligado = false
+
     fun plugou(ctx: Context, um: UsbManager, d: UsbDevice, episodio: Any? = null) {
         try {
+            if (!ligado(ctx)) {
+                if (!avisouDesligado) { avisouDesligado = true; Registro.anotar("canal: desligado nesta versão (o Android Auto fica sozinho no cabo)") }
+                return
+            }
             preparar(ctx)
             if (!CanalCabo.temAdb(d)) {
                 if (CanalCabo.estado != CanalCabo.SEM_ADB) Registro.anotar("canal: o celular está sem a Depuração USB (só o Android Auto pelo cabo)")
