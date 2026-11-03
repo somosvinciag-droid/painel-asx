@@ -442,3 +442,38 @@ Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica
   put`, se desliga a depuração depois de atualizar); o Android mostra o ponto verde "Shell usando o microfone".
 - Testes JVM (fora do repo): `scratchpad/canal-integra/teste/rodar.sh` (vetores + adb de verdade + celular falso +
   cabo USB falso + CanalCabo; 16 + 7 + 20 + 32).
+
+## Revisão da noite 03/11 (ramo `rascunho-noite`)
+- Quedas do AA de 02/11 (18:20:32, 18:20:41, 18:24:38, 18:25:29): "quadro aberto depois do TLS ignorado (canal 136/88/19)"
+  e logo "Unable to parse TLS packet header", sempre com "leituras com erro na hora". Causa provável: no usbfs da central,
+  bulkTransfer de LEITURA que volta com erro/prazo JOGA FORA os bytes já recebidos naquela transferência → fluxo
+  desalinhado → TLS morto (o "SSL_write" de 01/11 17:14 é o mesmo desalinho visto pela escrita). O teste JVM [11]
+  reproduz o registro do carro perdendo 4/7/1000 bytes.
+- `LeitorUsb.kt`: a leitura do AA usa UM `UsbRequest` na fila (como o aasdk/OpenAuto com libusb assíncrono): o prazo não
+  cancela nada e, com erro, os bytes que chegaram são entregues. `FilaUsb` por conexão (em `ConexoesUsb`): trava, pedidos
+  "colhidos" por outra leitura (conversa velha e nova no mesmo cabo) e órfãos (pedido que pode estar no kernel NUNCA é
+  `close()` antes de a conexão fechar: o kernel escreve nele ao colher). Sem UsbRequest: bulkTransfer de antes. O canal
+  ADB continua síncrono (1 pacote por leitura). O resumo da conversa traz "problemas: erro aos X s/Y KB".
+  Testes: `scratchpad/noite/usb/rodar.sh` (16, cabo falso que imita o usbfs).
+- Registro novo "aa: quadro que o TLS recusou: canal, flags, tamanho, registro começa com [..]" (17 03 03 = certo).
+- `CaboUsb.caboTerminou`: queda depois do TLS com o cabo plugado → reinicia o USB do celular SEMPRE (antes só ≥ 20 s;
+  reabrir o mesmo acessório lia a conversa velha). Quedas < 20 s seguidas: no máximo 8 por plugada, depois para até soltar.
+  Plano B (`planoB`): 4 s depois do reinício, se o mesmo aparelho continua no cabo e ninguém fala com ele, pede o modo AA
+  de novo (02/11 18:20:44 o reinício não fez o celular sair e o AA ficou 70 s parado). Vale também na partida.
+- Canal ADB: `settings put` recusado pelo HyperOS (SecurityException) fica anotado (`adb/configurado-negado`) e só é
+  tentado de novo depois de 7 dias. "Ninguém tocou em Permitir" vale para a PLUGADA física (o `Plugada` do CaboUsb vai
+  como `episodio`): o celular que muda de nome quando o AA reinicia o USB não pergunta de novo; a voz "Toque em Permitir"
+  sai uma vez por plugada. Testes [18] e [19] em `scratchpad/noite/canal/` (cópia ampliada do teste do canal).
+- O que NÃO é do nosso código: o celular trocar de modo USB ("cabo solto" → 2717:ff08/ff88 → 2d01) 1–3 s depois de
+  "canal: pronto" em 18:22:09 e 18:22:21 (logo depois de ligar a Depuração USB às 18:21:53). O canal só fala ADB
+  (CNXN/AUTH, `exec:`, `sync:`, `localabstract:`) e o `settings put` foi recusado (não mudou nada); nada mexe na
+  configuração USB do celular. Provável HyperOS reaplicando o USB depois de ligar a depuração / do "Permitir" sem "Sempre".
+- Jarvis: `Corretor.NOME_JARVIS`/`SAUDACAO` (uma regra para Corretor e Comandos: "Hey, Jervos", "Olá Jarvis", "Jérvis";
+  "Gabi me ligou" não vira Jarvis). Ajuda falada: "ajuda", "quais são as opções/comandos", "o que você sabe fazer".
+- `TelaAndroidAuto.Decodificador`: erros seguidos → `codec.reset()` + configuração + imagem inteira (até 3 vezes; depois
+  solta o vídeo); quadro perdido (fila cheia / 200 ms sem vaga) → espera SPS/IDR por até 3 s (sem borrão).
+  `onNewIntent` liga o decodificador a uma conversa nova com a tela já aberta.
+- `Turbo.limpar`: uma limpeza por vez.
+- Ideia não feita (só com teste no carro): a central é `musb-hdrc`; se as quedas continuarem SÓ com o canal ADB ligado,
+  suspeitar das leituras ADB com prazo de 1 s (cancelamento de URB no MUSB) e passar o ADB também para pedido assíncrono
+  (precisa de uma linha única que colhe os pedidos das duas interfaces).
