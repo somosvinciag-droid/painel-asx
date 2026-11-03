@@ -37,20 +37,44 @@ jobs:
           sudo apt-get install -y -qq osmium-tool
           pip install -q "osmium==4.3.2" "rasterio==1.4.3" "numpy==2.2.6" "shapely==2.1.1"
 
-      - name: OpenStreetMap (Geofabrik Sudeste, recorte de Caxambu)
+      - name: Recorte do OSM guardado (evita baixar o Sudeste inteiro a cada vez)
+        id: cache-osm
+        uses: actions/cache@v4
+        with:
+          path: w/caxambu.osm.pbf
+          key: osm-caxambu-v1
+
+      - name: OpenStreetMap (Overpass; se falhar, Geofabrik Sudeste + recorte)
+        if: steps.cache-osm.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           mkdir -p w sai
-          curl -fsSL --retry 5 --retry-delay 10 -o w/sudeste.osm.pbf \
-            https://download.geofabrik.de/south-america/brazil/sudeste-latest.osm.pbf
-          ls -la w/sudeste.osm.pbf
-          osmium extract -b "-44.975,-22.005,-44.889,-21.949" --strategy complete_ways -o w/caxambu.osm.pbf w/sudeste.osm.pbf
-          rm w/sudeste.osm.pbf
+          Q='[out:xml][timeout:300][bbox:-22.005,-44.975,-21.949,-44.889];
+          (way["highway"];way["building"];relation["building"];way["landuse"];relation["landuse"];
+           way["leisure"];relation["leisure"];way["natural"];relation["natural"];way["waterway"];
+           way["place"];relation["place"];way["amenity"];way["tourism"];relation["tourism"];node["name"];);
+          (._;>;);out body;'
+          ok=0
+          for U in https://overpass-api.de/api/interpreter https://overpass.kumi.systems/api/interpreter https://maps.mail.ru/osm/tools/overpass/api/interpreter; do
+            if curl -fsS --max-time 400 --data-urlencode "data=$Q" "$U" -o w/caxambu.osm && grep -q "<way" w/caxambu.osm; then
+              echo "Overpass ok: $U"; ok=1; break
+            fi
+            echo "Overpass falhou: $U"
+          done
+          if [ "$ok" = 1 ]; then
+            osmium cat w/caxambu.osm -o w/caxambu.osm.pbf --overwrite
+          else
+            curl -fsSL --retry 5 --retry-delay 10 -o w/sudeste.osm.pbf \
+              https://download.geofabrik.de/south-america/brazil/sudeste-latest.osm.pbf
+            osmium extract -b "-44.975,-22.005,-44.889,-21.949" --strategy complete_ways -o w/caxambu.osm.pbf w/sudeste.osm.pbf
+            rm w/sudeste.osm.pbf
+          fi
           ls -la w/caxambu.osm.pbf
 
       - name: Relevo (Copernicus DEM GLO-30, AWS)
         run: |
           set -euo pipefail
+          mkdir -p w sai
           # Caxambu fica perto de 22°S: precisa do quadro S22 (22°S a 21°S) e do S23 (o sul da área passa de 22°S)
           for T in Copernicus_DSM_COG_10_S22_00_W045_00_DEM Copernicus_DSM_COG_10_S23_00_W045_00_DEM; do
             curl -fsSL --retry 5 -o "w/$T.tif" "https://copernicus-dem-30m.s3.amazonaws.com/$T/$T.tif"
