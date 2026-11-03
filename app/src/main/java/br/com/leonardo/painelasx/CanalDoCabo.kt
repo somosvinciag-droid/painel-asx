@@ -44,7 +44,7 @@ object CanalDoCabo {
     }
 
     /** O celular (acessório) foi aberto pelo CaboUsb. */
-    fun plugou(ctx: Context, um: UsbManager, d: UsbDevice) {
+    fun plugou(ctx: Context, um: UsbManager, d: UsbDevice, episodio: Any? = null) {
         try {
             preparar(ctx)
             if (!CanalCabo.temAdb(d)) {
@@ -61,6 +61,7 @@ object CanalDoCabo {
                 log = { Registro.anotar(it) },
                 avisar = { frase -> Rede.naTela { try { Voz.falar(frase, Voz.Tipo.IMPORTANTE) } catch (_: Throwable) { } } },
                 atrasoMs = ATRASO_MS,
+                episodio = episodio,
             )
         } catch (e: Throwable) {
             Registro.anotar("ERRO canal: ${e.javaClass.simpleName}: ${e.message}")

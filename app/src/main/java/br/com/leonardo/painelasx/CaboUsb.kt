@@ -775,7 +775,8 @@ object CaboUsb {
                     } else Registro.anotar("cabo USB: não abri o acessório (outro app, como o ZLink, pegou antes?)")
                     // Canal paralelo pelo MESMO cabo (interface ADB do 18d1:2d01): microfone e internet do celular.
                     // Começa um pouco depois, numa linha própria (o Android Auto passa primeiro).
-                    if (ehAcessorio(d)) CanalDoCabo.plugou(ctx, um, d)
+                    // A plugada física vai junto: "ninguém tocou em Permitir" vale até o cabo ser solto de verdade.
+                    if (ehAcessorio(d)) CanalDoCabo.plugou(ctx, um, d, p)
                 }
             } catch (e: Exception) {
                 Registro.anotar("ERRO cabo USB: ${e.javaClass.simpleName}: ${e.message}")

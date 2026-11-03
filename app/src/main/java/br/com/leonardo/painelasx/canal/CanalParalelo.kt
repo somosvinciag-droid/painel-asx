@@ -438,6 +438,14 @@ object CanalCabo {
     @Volatile private var log: (String) -> Unit = {}
     /** Aparelhos largados nesta plugada (sem "Permitir" ou tentativas esgotadas): nada de perguntar de novo até soltar. */
     private val largados = HashSet<String>()
+    /**
+     * A plugada (do CaboUsb: do plugar até o cabo ficar 6 s sem celular) em que ninguém tocou em "Permitir". O celular
+     * muda de nome no USB quando o Android Auto reinicia (02/11 18:22–18:27: "toque em PERMITIR" 5 vezes na mesma
+     * plugada): com isto, nem a voz nem o pedido no celular voltam até o cabo ser solto de verdade.
+     */
+    @Volatile private var episodioSemPermissao: Any? = null
+    /** A plugada em que a voz "Toque em Permitir" já foi falada (uma vez por plugada). */
+    @Volatile private var episodioAvisado: Any? = null
 
     /** Pronto para usar (ADB autenticado, servidor do celular respondendo). */
     val ligado: Boolean get() = estado == "ligado" && canal?.adb?.aberta == true
@@ -462,21 +470,31 @@ object CanalCabo {
         avisar: (String) -> Unit = {},
         atrasoMs: Long = 0,
         esperaPermissaoMs: Long = 120_000,
+        /** Identidade da plugada física (null = desconhecida: cada aparelho é uma plugada). */
+        episodio: Any? = null,
     ) {
         val t: Thread
         synchronized(this) {
             if (linha?.isAlive == true && aparelhoAtual == nome) return
             if (nome in largados) return      // o Android Auto reabriu o mesmo aparelho: não pergunta de novo
+            if (episodio != null && episodio === episodioSemPermissao) {
+                // Mesma plugada, celular com outro nome (o Android Auto reiniciou o USB): ninguém tocou em Permitir antes.
+                largados.add(nome)
+                return
+            }
             aparelhoAtual = nome
             this.log = log
-            t = Thread({ laco(nome, abrir, pasta, jar, log, avisar, atrasoMs, esperaPermissaoMs) }, "canal-cabo").apply { isDaemon = true }
+            val avisarUmaVez: (String) -> Unit = { frase ->
+                if (episodio == null || episodioAvisado !== episodio) { episodioAvisado = episodio; avisar(frase) }
+            }
+            t = Thread({ laco(nome, abrir, pasta, jar, log, avisarUmaVez, atrasoMs, esperaPermissaoMs, episodio) }, "canal-cabo").apply { isDaemon = true }
             linha = t
         }
         t.start()
     }
 
     private fun laco(nome: String, abrir: () -> AdbTransporte?, pasta: File, jar: () -> ByteArray, log: (String) -> Unit,
-                     avisar: (String) -> Unit, atrasoMs: Long, esperaPermissaoMs: Long) {
+                     avisar: (String) -> Unit, atrasoMs: Long, esperaPermissaoMs: Long, episodio: Any?) {
         try { if (atrasoMs > 0) Thread.sleep(atrasoMs) } catch (_: InterruptedException) { return }
         var tentativas = 0
         while (aparelhoAtual == nome && tentativas < MAX_TENTATIVAS) {
@@ -486,7 +504,7 @@ object CanalCabo {
                 rodar(nome, abrir, pasta, jar, log, avisar, esperaPermissaoMs, { c -> meu = c }) { tentativas = 0 }
             } catch (e: AdbSemPermissao) {
                 if (aparelhoAtual == nome) {
-                    synchronized(this) { largados.add(nome) }
+                    synchronized(this) { largados.add(nome); if (episodio != null) episodioSemPermissao = episodio }
                     estado = SEM_PERMISSAO; ultimoErro = e.message ?: ""
                     log("canal: ninguém tocou em Permitir no celular; fico parado até o cabo ser solto")
                 }
