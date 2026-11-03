@@ -521,6 +521,25 @@ def calcular_rota(vias, areas, lugares, pistas=(), altura=None):
             rotulos.append("centro")
         # Parque das Águas: contorno pelos 4 lados
         pq = [ar for ar in areas if "parque das aguas" in sem_acento(ar[3])]
+        if not pq:
+            # no OSM o parque está como leisure=park SEM nome: é o parque que tem as fontes (Fonte Dom Pedro, Geiser...)
+            fontes = [Point(l[0], l[1]) for l in lugares if l[3] == "fountain" or "balneario" in sem_acento(l[2])]
+            melhor, mc = None, 1
+            for i, ar in enumerate(areas):
+                if ar[0] != AREA_PARQUE or ar[3]:
+                    continue
+                try:
+                    pg = Polygon(ar[1]).buffer(0)
+                except Exception:
+                    continue
+                c = sum(1 for f in fontes if pg.contains(f))
+                if c > mc:
+                    melhor, mc = i, c
+            if melhor is not None:
+                tipo, ext, ints, _ = areas[melhor]
+                areas[melhor] = (tipo, ext, ints, "Parque das Águas")
+                pq = [areas[melhor]]
+                print(f"Parque das Águas = parque sem nome do OSM com {mc} fontes dentro", file=sys.stderr)
         caixa = None
         if pq:
             pg = Polygon(max(pq, key=lambda ar: Polygon(ar[1]).area)[1])
@@ -557,6 +576,18 @@ def calcular_rota(vias, areas, lugares, pistas=(), altura=None):
                 rotulos.append(f"subida ({altura(*pos[alto]):.0f} m)")
         alvos.append(alvos[0])
         rotulos.append(rotulos[0])
+    cam = rota_por(alvos, rotulos, cands, pos, adj, penal)
+    comp = sum(math.dist(pos[a], pos[b]) for a, b in zip(cam, cam[1:]))
+    if not ROTA and comp > 4600 and any(r.startswith("subida") for r in rotulos):
+        print(f"  rota com a subida ficou com {comp:.0f} m; tiro a subida", file=sys.stderr)
+        k = [i for i, r in enumerate(rotulos) if r.startswith("subida")][0]
+        del alvos[k], rotulos[k]
+        cam = rota_por(alvos, rotulos, cands, pos, adj, penal)
+    pts, acum, nomes, ins = instrucoes(cam, pos, nome_aresta, rot_aresta, vias, grau)
+    return pts, acum, nomes, ins
+
+
+def rota_por(alvos, rotulos, cands, pos, adj, penal):
     nos = []
     for (x, y), r in zip(alvos, rotulos):
         n, d = no_mais_perto(cands, pos, x, y)
@@ -571,9 +602,7 @@ def calcular_rota(vias, areas, lugares, pistas=(), altura=None):
             print(f"  sem caminho entre {a} e {b}; pulo", file=sys.stderr)
             continue
         cam += p[1:]
-    cam = tirar_idas_e_voltas(cam)
-    pts, acum, nomes, ins = instrucoes(cam, pos, nome_aresta, rot_aresta, vias, grau)
-    return pts, acum, nomes, ins
+    return tirar_idas_e_voltas(cam)
 
 
 # ---------------------------------------------------------------- principal
@@ -727,6 +756,9 @@ def main():
         return float(h[j, i] * (1 - u) * (1 - v) + h[j, i + 1] * u * (1 - v) + h[j + 1, i] * (1 - u) * v + h[j + 1, i + 1] * u * v)
 
     rpts, racum, rnomes, ins = calcular_rota(ld.vias, ld.areas, ld.lugares, ld.pistas, altura)
+    areas = []
+    for tipo, ext, ints, nome in ld.areas:
+        areas.append([tipo, nid(nome), achatar(ext[:-1]), [achatar(i[:-1]) for i in ints]])
     print(f"Rota: {racum[-1]:.0f} m, {len(rpts)} pontos, {len(ins)} instruções", file=sys.stderr)
     for x in ins:
         print(f"  {x['s']:5d} m  {x['texto']}", file=sys.stderr)
