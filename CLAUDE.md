@@ -456,6 +456,9 @@ Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica
   ADB continua síncrono (1 pacote por leitura). O resumo da conversa traz "problemas: erro aos X s/Y KB".
   Testes: `scratchpad/noite/usb/rodar.sh` (16, cabo falso que imita o usbfs).
 - Registro novo "aa: quadro que o TLS recusou: canal, flags, tamanho, registro começa com [..]" (17 03 03 = certo).
+  Cabeçalho impossível (flags > 0x0f ou canal > 15) = fluxo desalinhado: encerra na hora ("cabeçalho impossível").
+  `Remontador` reaproveita o buffer de cada canal (até 512 KB). Testes do receptor: `scratchpad/noite/aa/rodar.sh`
+  (226 + 5; o [11] perde 1 a 9000 bytes no meio do fluxo).
 - `CaboUsb.caboTerminou`: queda depois do TLS com o cabo plugado → reinicia o USB do celular SEMPRE (antes só ≥ 20 s;
   reabrir o mesmo acessório lia a conversa velha). Quedas < 20 s seguidas: no máximo 8 por plugada, depois para até soltar.
   Plano B (`planoB`): 4 s depois do reinício, se o mesmo aparelho continua no cabo e ninguém fala com ele, pede o modo AA
