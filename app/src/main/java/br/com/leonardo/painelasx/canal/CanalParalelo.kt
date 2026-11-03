@@ -102,13 +102,20 @@ class CanalParalelo(val adb: AdbConexao, private val log: (String) -> Unit = {})
      * Configurações de UMA vez, feitas pela própria central (o shell pode mudar "settings global"):
      * não deixar o Android apagar a autorização desta central depois de 7 dias sem uso
      * (= "Desativar tempo limite de autorização adb" nas Opções do desenvolvedor).
+     * Devolve [CONFIG_OK], [CONFIG_NEGADO] (o celular não deixa: no HyperOS precisa de "Depuração USB (configurações de
+     * segurança)"; 02/11 18:22) ou [CONFIG_ERRO] (cabo/ADB: tenta de novo na próxima plugada).
      */
-    fun configurarUmaVez(): Boolean = try {
+    fun configurarUmaVez(): String = try {
         val r = adb.executar("settings put global adb_allowed_connection_time 0 2>&1; settings get global adb_allowed_connection_time 2>&1").trim()
         val ok = r.lines().lastOrNull()?.trim() == "0"
-        log(if (ok) "canal: autorização do celular sem prazo (não expira em 7 dias)" else "canal: não mudei o prazo da autorização (${r.take(120)})")
-        ok
-    } catch (e: IOException) { log("canal: não mudei o prazo da autorização (${e.message})"); false }
+        val negado = !ok && (r.contains("SecurityException") || r.contains("Permission denial", ignoreCase = true))
+        log(when {
+            ok -> "canal: autorização do celular sem prazo (não expira em 7 dias)"
+            negado -> "canal: o celular não deixou tirar o prazo da autorização (sem problema: tento de novo daqui a 7 dias)"
+            else -> "canal: não mudei o prazo da autorização (${r.replace('\n', ' ').take(120)})"
+        })
+        if (ok) CONFIG_OK else if (negado) CONFIG_NEGADO else CONFIG_ERRO
+    } catch (e: IOException) { log("canal: não mudei o prazo da autorização (${e.message})"); CONFIG_ERRO }
 
     // ------------------------------------------------------------------ microfone
 
@@ -161,6 +168,9 @@ class CanalParalelo(val adb: AdbConexao, private val log: (String) -> Unit = {})
         const val DESTINO = "localabstract:$SOQUETE"
         const val PASTA = "/data/local/tmp"
         const val CLASSE_SERVIDOR = "br.com.leonardo.painelasx.canal.servidor.Servidor"
+        const val CONFIG_OK = "ok"
+        const val CONFIG_NEGADO = "negado"
+        const val CONFIG_ERRO = "erro"
 
         /** Versão = começo do sha-256 do .jar (muda sozinha a cada mudança no servidor). */
         fun versaoDo(jar: ByteArray): String =
@@ -409,6 +419,8 @@ object CanalCabo {
     const val SEM_ADB = "sem ADB (ligue a Depuração USB no celular)"
     const val MAX_TENTATIVAS = 5
     private const val PING_MS = 20_000L
+    /** "settings put" negado pelo celular: só tenta de novo depois disto. */
+    private const val ESPERA_NEGADO_MS = 7L * 24 * 3600 * 1000
 
     @Volatile var estado = "desligado"
         private set
@@ -426,6 +438,14 @@ object CanalCabo {
     @Volatile private var log: (String) -> Unit = {}
     /** Aparelhos largados nesta plugada (sem "Permitir" ou tentativas esgotadas): nada de perguntar de novo até soltar. */
     private val largados = HashSet<String>()
+    /**
+     * A plugada (do CaboUsb: do plugar até o cabo ficar 6 s sem celular) em que ninguém tocou em "Permitir". O celular
+     * muda de nome no USB quando o Android Auto reinicia (02/11 18:22–18:27: "toque em PERMITIR" 5 vezes na mesma
+     * plugada): com isto, nem a voz nem o pedido no celular voltam até o cabo ser solto de verdade.
+     */
+    @Volatile private var episodioSemPermissao: Any? = null
+    /** A plugada em que a voz "Toque em Permitir" já foi falada (uma vez por plugada). */
+    @Volatile private var episodioAvisado: Any? = null
 
     /** Pronto para usar (ADB autenticado, servidor do celular respondendo). */
     val ligado: Boolean get() = estado == "ligado" && canal?.adb?.aberta == true
@@ -450,21 +470,31 @@ object CanalCabo {
         avisar: (String) -> Unit = {},
         atrasoMs: Long = 0,
         esperaPermissaoMs: Long = 120_000,
+        /** Identidade da plugada física (null = desconhecida: cada aparelho é uma plugada). */
+        episodio: Any? = null,
     ) {
         val t: Thread
         synchronized(this) {
             if (linha?.isAlive == true && aparelhoAtual == nome) return
             if (nome in largados) return      // o Android Auto reabriu o mesmo aparelho: não pergunta de novo
+            if (episodio != null && episodio === episodioSemPermissao) {
+                // Mesma plugada, celular com outro nome (o Android Auto reiniciou o USB): ninguém tocou em Permitir antes.
+                largados.add(nome)
+                return
+            }
             aparelhoAtual = nome
             this.log = log
-            t = Thread({ laco(nome, abrir, pasta, jar, log, avisar, atrasoMs, esperaPermissaoMs) }, "canal-cabo").apply { isDaemon = true }
+            val avisarUmaVez: (String) -> Unit = { frase ->
+                if (episodio == null || episodioAvisado !== episodio) { episodioAvisado = episodio; avisar(frase) }
+            }
+            t = Thread({ laco(nome, abrir, pasta, jar, log, avisarUmaVez, atrasoMs, esperaPermissaoMs, episodio) }, "canal-cabo").apply { isDaemon = true }
             linha = t
         }
         t.start()
     }
 
     private fun laco(nome: String, abrir: () -> AdbTransporte?, pasta: File, jar: () -> ByteArray, log: (String) -> Unit,
-                     avisar: (String) -> Unit, atrasoMs: Long, esperaPermissaoMs: Long) {
+                     avisar: (String) -> Unit, atrasoMs: Long, esperaPermissaoMs: Long, episodio: Any?) {
         try { if (atrasoMs > 0) Thread.sleep(atrasoMs) } catch (_: InterruptedException) { return }
         var tentativas = 0
         while (aparelhoAtual == nome && tentativas < MAX_TENTATIVAS) {
@@ -474,7 +504,7 @@ object CanalCabo {
                 rodar(nome, abrir, pasta, jar, log, avisar, esperaPermissaoMs, { c -> meu = c }) { tentativas = 0 }
             } catch (e: AdbSemPermissao) {
                 if (aparelhoAtual == nome) {
-                    synchronized(this) { largados.add(nome) }
+                    synchronized(this) { largados.add(nome); if (episodio != null) episodioSemPermissao = episodio }
                     estado = SEM_PERMISSAO; ultimoErro = e.message ?: ""
                     log("canal: ninguém tocou em Permitir no celular; fico parado até o cabo ser solto")
                 }
@@ -518,10 +548,20 @@ object CanalCabo {
         canal = c
         criou(c)
         // Uma vez por celular: não deixar o Android apagar a autorização depois de 7 dias sem dirigir.
+        // Se o celular NÃO deixa (HyperOS sem "Depuração USB (configurações de segurança)"), não pergunta de novo a cada
+        // plugada: anota e tenta só depois de 7 dias (é inofensivo: só a autorização expira se ficar 7 dias sem plugar).
         val feito = File(pasta, "adb/configurado")
+        val negado = File(pasta, "adb/configurado-negado")
         val chaveCel = modelo + "|" + (adb.propriedades["ro.product.device"] ?: "")
-        if ((try { feito.readText() } catch (_: Exception) { "" }) != chaveCel && c.configurarUmaVez()) {
-            try { feito.parentFile?.mkdirs(); feito.writeText(chaveCel) } catch (_: Exception) { }
+        val negadoRecente = try {
+            val l = negado.readText().lines()
+            l.firstOrNull() == chaveCel && System.currentTimeMillis() - (l.getOrNull(1)?.toLongOrNull() ?: 0L) in 0 until ESPERA_NEGADO_MS
+        } catch (_: Exception) { false }
+        if ((try { feito.readText() } catch (_: Exception) { "" }) != chaveCel && !negadoRecente) {
+            when (c.configurarUmaVez()) {
+                CanalParalelo.CONFIG_OK -> try { feito.parentFile?.mkdirs(); feito.writeText(chaveCel); negado.delete() } catch (_: Exception) { }
+                CanalParalelo.CONFIG_NEGADO -> try { negado.parentFile?.mkdirs(); negado.writeText(chaveCel + "\n" + System.currentTimeMillis()) } catch (_: Exception) { }
+            }
         }
         val versao = CanalParalelo.versaoDo(j)
         if (!c.garantirServidor(j, versao)) throw AdbErro("o servidor do celular não subiu")

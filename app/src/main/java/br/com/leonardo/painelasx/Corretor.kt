@@ -47,6 +47,20 @@ object Corretor {
         "limite" to "limite", "resumo" to "resumo", "clima" to "clima", "tempo" to "tempo", "apps" to "apps", "aplicativos" to "apps"
     )
 
+    /**
+     * O nome do Jarvis como o Whisper escreve: "Jarvis", "Jarbas", "Jerves", "Jervos" (02/11 21:39), "Gervis", "Javis"…
+     * Regra: j/g + vogal + r + v/b + até 2 vogais + (s/z), ou sem o r mas terminando em s/z ("Javis"), numa palavra só.
+     * Usado no COMEÇO da frase (depois de uma saudação opcional), onde quase nenhuma palavra de comando tem essa forma
+     * ("Gabi me ligou" não vira Jarvis: sem r e sem s).
+     */
+    const val NOME_JARVIS = "[jg][aeiyáàâãéêí](?:r[vb][aeiouyáéíóúâêôãõ]{0,2}[sz]?|[vb][aeiouyáéíóúâêôãõ]{0,2}[sz])"
+    /** Saudações antes do nome ("Ei", "Hey", "Ok", "E aí", "Oi", "Olá"). */
+    const val SAUDACAO = "ok|okay|ei|hei|hey|ey|e aí|e ai|oi|olá|ola"
+    /** "Ei, Jerves!", "Hey, Jervos,", "ok jarbas por favor" no começo do texto falado (com pontuação). */
+    val INICIO_JARVIS = Regex("^\\W*(($SAUDACAO)\\W+)?($NOME_JARVIS)\\b\\W*(por favor\\b\\W*)?", RegexOption.IGNORE_CASE)
+    /** O mesmo no texto já normalizado (sem acento nem pontuação). */
+    val INICIO_JARVIS_NORMALIZADO = Regex("^(($SAUDACAO) )?($NOME_JARVIS)( por favor)?\\b")
+
     fun normalizar(t: String): String =
         Normalizer.normalize(t.lowercase(), Normalizer.Form.NFD)
             .replace(Regex("\\p{M}"), "")
@@ -59,8 +73,7 @@ object Corretor {
         if (texto.isEmpty()) return texto
         // "Jarvis, …": corrige só o que vem depois do nome.
         var prefixo = ""
-        Regex("^\\W*((ok|ei|e aí|e ai|oi)\\W+)?(jarvis|jarbas|jarvas|jervis|javis|jarves|jarvi)\\b\\W*(por favor\\W*)?", RegexOption.IGNORE_CASE)
-            .find(texto)?.let { m ->
+        INICIO_JARVIS.find(texto)?.let { m ->
                 prefixo = "Jarvis, "
                 texto = texto.substring(m.range.last + 1).trim()
             }

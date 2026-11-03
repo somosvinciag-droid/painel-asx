@@ -31,6 +31,8 @@ object AaQuadro {
     const val MAX_CORPO = 65535
     /** Maior mensagem remontada que guardamos (capa da música pode ter ~1 MB). */
     const val MAX_MENSAGEM = 4 * 1024 * 1024
+    /** Maior buffer de remontagem que fica guardado por canal para a próxima mensagem. */
+    const val MAX_REUSO = 512 * 1024
 
     fun temTotal(flags: Int) = flags and PRIMEIRO != 0 && flags and ULTIMO == 0
 
@@ -131,6 +133,11 @@ object AaQuadro {
         }
 
         private val runs = arrayOfNulls<Run>(256)
+        /**
+         * Buffer reaproveitado de cada canal (a mensagem devolvida só vale até a próxima: quem usa já copia). Com a tela
+         * do Android Auto aberta, cada quadro de vídeo grande (> 16 KB, partido em pedaços) criava um ByteArray novo.
+         */
+        private val reuso = arrayOfNulls<ByteArray>(256)
         private val saida = Mensagem()
         var descartes = 0L
             private set
@@ -159,7 +166,10 @@ object AaQuadro {
             while (r.bytesTipo < 2 && k < n) { r.tipo = (r.tipo shl 8) or (b[ini + k].toInt() and 0xFF); r.bytesTipo++; k++ }
             if (r.bytesTipo == 2 && r.usados == 0 && r.bytes == null && !r.semGuardar) {
                 r.semGuardar = ehVideo(canal) && r.tipo <= 1 && flags and CONTROLE == 0
-                if (!r.semGuardar && !r.ruim) r.bytes = ByteArray(minOf(r.total, 64 * 1024).coerceAtLeast(2))
+                if (!r.semGuardar && !r.ruim) {
+                    val inicial = minOf(r.total, 64 * 1024).coerceAtLeast(2)
+                    r.bytes = reuso[canal]?.takeIf { it.size >= inicial } ?: ByteArray(inicial)
+                }
             }
             val corpo = n - k
             if (!r.semGuardar && !r.ruim && r.bytesTipo == 2) {
@@ -180,7 +190,10 @@ object AaQuadro {
                 descartes++
                 return preencher(canal, r.flags or ULTIMO, r.tipo, ByteArray(0), 0, 0, true)
             }
-            return preencher(canal, r.flags or ULTIMO, r.tipo, r.bytes!!, 0, r.usados, false)
+            val pronto = r.bytes!!
+            // Guarda para a próxima mensagem do canal (não guarda buffer enorme, ex.: capa de música de vários MB).
+            if (pronto.size <= MAX_REUSO) reuso[canal] = pronto
+            return preencher(canal, r.flags or ULTIMO, r.tipo, pronto, 0, r.usados, false)
         }
 
         private fun preencher(canal: Int, flags: Int, tipo: Int, b: ByteArray, ini: Int, fim: Int, descartada: Boolean): Mensagem {
@@ -189,6 +202,6 @@ object AaQuadro {
             return saida
         }
 
-        fun limpar() { for (i in runs.indices) runs[i] = null }
+        fun limpar() { for (i in runs.indices) runs[i] = null; for (i in reuso.indices) reuso[i] = null }
     }
 }

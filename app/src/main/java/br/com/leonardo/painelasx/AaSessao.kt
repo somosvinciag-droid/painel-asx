@@ -415,6 +415,8 @@ class AaSessao(
     }
 
     private val separador = AaQuadro.Separador()
+    /** Quadros cifrados lidos nesta conversa (para o registro de uma queda). */
+    private var quadrosLidos = 0L
     // O vídeo só é guardado (copiado) quando há uma tela olhando.
     private val remontador = AaQuadro.Remontador { it == Aa.CANAL_VIDEO && video == null }
 
@@ -436,16 +438,33 @@ class AaSessao(
     private fun quadro(canal: Int, flags: Int, total: Int, b: ByteArray, ini: Int, n: Int) {
         if (fim.get()) return
         val m = motor ?: return
+        // Cabeçalho impossível (flags só usam os 4 bits de baixo; anunciamos os canais 0 a 10): o fluxo do cabo se
+        // desalinhou (bytes perdidos no USB, 02/11 "canal 136/88/19"). Nada mais desta conversa vai ser lido certo:
+        // encerra já (a central reinicia o USB e reconecta) em vez de esperar o TLS tropeçar.
+        if (flags and 0xF0 != 0 || canal > 15) {
+            ev.registro("aa: cabeçalho impossível (canal $canal, flags $flags, $n bytes; quadro ${quadrosLidos + 1}): bytes perdidos no cabo")
+            encerrar("o fluxo do cabo se desalinhou (bytes perdidos no USB)")
+            return
+        }
         if (flags and AaQuadro.CIFRADO == 0) {
             // Aberto depois do TLS. Pedaço atrasado do aperto de mão (ex.: TLS 1.3 manda o "ticket" depois):
             // passa pelo motor TLS para a numeração dos registros não se perder. O resto (versão atrasada) é ignorado.
             if (canal == 0 && n >= 2 && b[ini].toInt() == 0 && b[ini + 1].toInt() == Aa.TLS) {
                 m.decifrarAberto(b, ini + 2, n - 2)
                 if (m.temControle()) fila.offer(Saida(CONTROLE_TLS, 0x0b, ByteArray(0)))
-            } else umaVez("aberto", "aa: quadro aberto depois do TLS ignorado (canal $canal)")
+            } else umaVez("aberto", "aa: quadro aberto depois do TLS ignorado (canal $canal, flags $flags, $n bytes; " +
+                "quadro ${quadrosLidos + 1}) — sinal de bytes perdidos no cabo")
             return
         }
-        val nTexto = m.decifrar(b, ini, n)
+        quadrosLidos++
+        val nTexto = try { m.decifrar(b, ini, n) } catch (e: javax.net.ssl.SSLException) {
+            // Só o cabeçalho do quadro e os 5 primeiros bytes do registro TLS (tipo, versão, tamanho: nada do conteúdo).
+            // Registro TLS certo começa com 17 03 03; outra coisa = o fluxo do cabo se desalinhou (bytes perdidos).
+            val cab = (0 until minOf(5, n)).joinToString(" ") { "%02x".format(b[ini + it]) }
+            ev.registro("aa: quadro que o TLS recusou: canal $canal, flags $flags, $n bytes, registro começa com [$cab]; " +
+                "quadro $quadrosLidos da conversa")
+            throw e
+        }
         // Registros só de controle do TLS (raros): ficam no motor; a linha de escrita é acordada e manda no canal 0.
         if (m.temControle()) fila.offer(Saida(CONTROLE_TLS, 0x0b, ByteArray(0)))
         val msg = remontador.aceitar(canal, flags, total, m.buffer(), 0, nTexto) ?: return
