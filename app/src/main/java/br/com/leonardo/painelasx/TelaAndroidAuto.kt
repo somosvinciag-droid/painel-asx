@@ -10,8 +10,9 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.Surface
-import android.view.SurfaceHolder
-import android.view.SurfaceView
+import android.graphics.SurfaceTexture
+import android.graphics.drawable.GradientDrawable
+import android.view.TextureView
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -24,7 +25,7 @@ import java.util.concurrent.TimeUnit
  * (H.264 pelo MediaCodec, direto na superfície, sem passar pelo processador) e os toques voltam para o celular.
  * Abre sozinha quando o Android Auto liga. O "sair" do próprio Android Auto fecha (fica a tela de fábrica por baixo).
  */
-class TelaAndroidAuto : Activity(), SurfaceHolder.Callback {
+class TelaAndroidAuto : Activity(), TextureView.SurfaceTextureListener {
 
     companion object {
         @Volatile private var aberta: TelaAndroidAuto? = null
@@ -46,8 +47,10 @@ class TelaAndroidAuto : Activity(), SurfaceHolder.Callback {
         val estaAberta get() = aberta != null
     }
 
-    private var superficie: SurfaceView? = null
+    private var superficie: TextureView? = null
+    private var saida: Surface? = null
     private var decodificador: Decodificador? = null
+    private var botao3d: TextView? = null
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
@@ -55,10 +58,29 @@ class TelaAndroidAuto : Activity(), SurfaceHolder.Callback {
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-        val raiz = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-        val sv = SurfaceView(this)
-        sv.holder.addCallback(this)
-        raiz.addView(sv, FrameLayout.LayoutParams(-1, -1))
+        val raiz = FrameLayout(this).apply {
+            // "Céu" que aparece atrás do mapa inclinado (visão em primeira pessoa).
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.parseColor("#05080D"), Color.parseColor("#0D1B2A"), Color.parseColor("#24364A")))
+        }
+        // TextureView (e não SurfaceView): só ela pode ser inclinada em 3D como uma vista comum.
+        val tv = TextureView(this)
+        tv.surfaceTextureListener = this
+        tv.setOnTouchListener { v, e -> tocar(v, e) }
+        raiz.addView(tv, FrameLayout.LayoutParams(-1, -1))
+        // Botão pequeno (pedido do Leonardo, 03/11): liga/desliga a visão inclinada ("primeira pessoa").
+        val d = resources.displayMetrics.density
+        val b3 = TextView(this).apply {
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply { cornerRadius = 10 * d; setColor(0x88000000.toInt()); setStroke((1 * d).toInt(), 0x55FFFFFF) }
+            setOnClickListener { mudarVisao() }
+        }
+        raiz.addView(b3, FrameLayout.LayoutParams((44 * d).toInt(), (30 * d).toInt(), Gravity.TOP or Gravity.END).apply {
+            topMargin = (6 * d).toInt(); rightMargin = (6 * d).toInt()
+        })
+        botao3d = b3
         // Botão discreto para voltar à tela do Painel (só se a F3 existir; o Leonardo a apagou em 01/11).
         if (Painel.F3_LIGADA) {
             val painel = TextView(this).apply {
@@ -69,12 +91,45 @@ class TelaAndroidAuto : Activity(), SurfaceHolder.Callback {
                 setPadding(22, 10, 22, 10)
                 setOnClickListener { voltarAoPainel() }
             }
-            raiz.addView(painel, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END))
+            raiz.addView(painel, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START))
         }
-        superficie = sv
+        superficie = tv
         setContentView(raiz)
         aberta = this
-        Registro.anotar("aa: tela do Android Auto aberta")
+        tv.post { aplicarVisao(animar = false) }
+        Registro.anotar("aa: tela do Android Auto aberta" + if (primeiraPessoa()) " (visão inclinada)" else "")
+    }
+
+    // ------------------------------------------------------------------ visão inclinada ("primeira pessoa")
+
+    private fun prefs() = getSharedPreferences("painel", Context.MODE_PRIVATE)
+    private fun primeiraPessoa() = prefs().getBoolean("aa_primeira_pessoa", false)
+
+    private fun mudarVisao() {
+        val nova = !primeiraPessoa()
+        prefs().edit().putBoolean("aa_primeira_pessoa", nova).apply()
+        Registro.anotar("aa: visão " + if (nova) "inclinada (primeira pessoa)" else "normal")
+        aplicarVisao(animar = true)
+    }
+
+    /**
+     * Inclina a imagem do Android Auto como um chão visto da altura do carro: gira em X com o eixo no pé da tela e
+     * aumenta um pouco (a parte de baixo passa das bordas, a de cima some no horizonte, com o "céu" atrás).
+     * Os toques continuam certos: o Android desfaz a inclinação antes de entregar o toque à vista ([tocar]).
+     */
+    private fun aplicarVisao(animar: Boolean) {
+        val v = superficie ?: return
+        val inclinada = primeiraPessoa()
+        botao3d?.text = if (inclinada) "2D" else "3D"
+        if (v.width == 0) return
+        val d = resources.displayMetrics.density
+        v.cameraDistance = 1400 * d
+        v.pivotX = v.width / 2f
+        v.pivotY = v.height.toFloat()
+        val rot = if (inclinada) 52f else 0f
+        val esc = if (inclinada) 1.45f else 1f
+        if (animar) v.animate().rotationX(rot).scaleX(esc).scaleY(esc).setDuration(450).start()
+        else { v.rotationX = rot; v.scaleX = esc; v.scaleY = esc }
     }
 
     /**
@@ -99,32 +154,43 @@ class TelaAndroidAuto : Activity(), SurfaceHolder.Callback {
 
     // ------------------------------------------------------------------ superfície
 
-    override fun surfaceCreated(h: SurfaceHolder) {
+    override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
         soltarDecodificador()
-        val (w, l) = AndroidAuto.tamanhoVideo()
-        val d = try { Decodificador(h.surface, w, l) } catch (e: Throwable) {
+        val (vw, vl) = AndroidAuto.tamanhoVideo()
+        st.setDefaultBufferSize(vw, vl)
+        val sup = Surface(st)
+        val d = try { Decodificador(sup, vw, vl) } catch (e: Throwable) {
             Registro.anotar("ERRO aa: não abri o decodificador de vídeo: ${e.javaClass.simpleName}: ${e.message?.take(80)}")
             null
-        } ?: return
+        }
+        if (d == null) { sup.release(); return }
+        saida = sup
         decodificador = d
         AndroidAuto.ligarVideo(d)
+        aplicarVisao(animar = false)
     }
 
-    override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, l: Int) {}
+    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) { aplicarVisao(animar = false) }
 
-    override fun surfaceDestroyed(h: SurfaceHolder) = soltarDecodificador()
+    override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+        soltarDecodificador()
+        return true
+    }
+
+    override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
 
     private fun soltarDecodificador() {
-        val d = decodificador ?: return
+        val d = decodificador
         decodificador = null
-        AndroidAuto.desligarVideo(d)
-        d.soltar()
+        if (d != null) { AndroidAuto.desligarVideo(d); d.soltar() }
+        saida?.let { try { it.release() } catch (_: Throwable) { } }
+        saida = null
     }
 
     // ------------------------------------------------------------------ toque
 
-    override fun onTouchEvent(e: MotionEvent): Boolean {
-        val v = superficie ?: return false
+    /** Toque na vista do vídeo: as coordenadas já vêm "desinclinadas" pelo Android (locais da vista). */
+    private fun tocar(v: View, e: MotionEvent): Boolean {
         if (v.width <= 0 || v.height <= 0) return false
         val (w, l) = AndroidAuto.tamanhoVideo()
         val acao = when (e.actionMasked) {
