@@ -73,9 +73,37 @@ class CanalAoa(
         if (saida.maxPacketSize > 0 && b.size % saida.maxPacketSize == 0) con.bulkTransfer(saida, ByteArray(0), 0, 1000)
     }
 
+    // ---- leitura do Android Auto: pedido USB assíncrono ([LeitorUsb]); sem ele, o bulkTransfer de sempre.
+    private var leitor: LeitorUsb? = null
+    private var leitorTentado = false
+    private val abertoEm = SystemClock.elapsedRealtime()
+    /** Primeiros problemas da leitura (hora e bytes já lidos): mostra no registro se um erro veio antes da queda. */
+    private val eventos = ArrayList<String>()
+
+    private fun marcar(o: String) {
+        synchronized(eventos) {
+            if (eventos.size < 6) eventos.add("$o aos ${(SystemClock.elapsedRealtime() - abertoEm) / 100 / 10.0} s/${bytesLidos / 1024} KB")
+        }
+    }
+
+    @Synchronized private fun leitorDaVez(): LeitorUsb? {
+        if (!leitorTentado && !fechado) {
+            leitorTentado = true
+            val l = LeitorUsb(con, entrada, ConexoesUsb.fila(con), aviso = { marcar(it) })
+            if (l.iniciar()) leitor = l
+            else Registro.anotar("aa: pedido USB assíncrono indisponível; leio o cabo do jeito antigo")
+        }
+        return leitor
+    }
+
     /** Android Auto: lê o que chegar (até [n] bytes) esperando no máximo [esperaMs]. -1 = fechado; 0 = nada. */
     fun lerBruto(buf: ByteArray, n: Int, esperaMs: Int): Int {
         if (fechado) return -1
+        leitorDaVez()?.let { l ->
+            val r = l.ler(buf, n, esperaMs)
+            if (r > 0) bytesLidos += r
+            return if (fechado) -1 else r
+        }
         val t0 = SystemClock.elapsedRealtime()
         val r = try { con.bulkTransfer(entrada, buf, minOf(n, 16384), esperaMs.coerceAtLeast(1)) } catch (_: Exception) { -1 }
         if (fechado) return -1
@@ -84,6 +112,7 @@ class CanalAoa(
         // até o aviso de "cabo solto" chegar.
         if (r < 0 && SystemClock.elapsedRealtime() - t0 < esperaMs / 2) {
             errosNaHora++
+            marcar("erro")
             try { Thread.sleep(50) } catch (_: InterruptedException) { }
         }
         return 0
@@ -106,11 +135,22 @@ class CanalAoa(
     }
 
     /** Uma linha para o registro quando a conversa acaba (ajuda a saber se outro app mexeu no cabo). */
-    fun resumo() = "lidos $bytesLidos bytes, $errosNaHora leituras com erro na hora, $escritasRecusadas escritas recusadas"
+    fun resumo(): String {
+        val l = leitor
+        val ev = synchronized(eventos) { eventos.joinToString(", ") }
+        return "lidos $bytesLidos bytes, ${errosNaHora + (l?.errosNaHora ?: 0)} leituras com erro na hora, $escritasRecusadas escritas recusadas" +
+            (if (l != null) " · leitura assíncrona (${l.vazios} vazias${if (l.deOutros > 0) ", ${l.deOutros} de outra leitura" else ""})" else "") +
+            (if (ev.isNotEmpty()) " · problemas: $ev" else "")
+    }
 
     override fun fechar() {
-        if (fechado) return
-        fechado = true
+        val l = synchronized(this) {
+            if (fechado) return
+            fechado = true
+            leitor
+        }
+        // Cancela e colhe o pedido assíncrono ANTES de soltar a interface (pedido no kernel não pode ser solto à toa).
+        try { l?.fechar() } catch (_: Exception) { }
         try { con.releaseInterface(intf) } catch (_: Exception) { }
         // A conexão é dividida com o canal ADB (mesmo aparelho): só fecha quando ninguém mais usa.
         ConexoesUsb.soltar(nomeAparelho, con)
@@ -125,6 +165,16 @@ class CanalAoa(
 object ConexoesUsb {
     private class Uso(val con: UsbDeviceConnection) { var vezes = 0 }
     private val usos = HashMap<String, Uso>()
+    /** Pedidos USB assíncronos de cada conexão ([LeitorUsb]): soltos só depois de a conexão fechar. */
+    private val filas = java.util.IdentityHashMap<UsbDeviceConnection, FilaUsb>()
+
+    @Synchronized
+    fun fila(c: UsbDeviceConnection): FilaUsb = filas.getOrPut(c) { FilaUsb() }
+
+    private fun fechar(c: UsbDeviceConnection) {
+        try { c.close() } catch (_: Exception) { }
+        filas.remove(c)?.let { f -> try { f.fechouConexao() } catch (_: Throwable) { } }
+    }
 
     /** A conexão do aparelho (abre se ninguém abriu). Toda chamada que devolve não-null precisa de um [soltar]. */
     @Synchronized
@@ -138,10 +188,10 @@ object ConexoesUsb {
     @Synchronized
     fun soltar(nome: String, c: UsbDeviceConnection) {
         val u = usos[nome]
-        if (u == null || u.con !== c) { try { c.close() } catch (_: Exception) { }; return }
+        if (u == null || u.con !== c) { fechar(c); return }
         if (--u.vezes > 0) return
         usos.remove(nome)
-        try { c.close() } catch (_: Exception) { }
+        fechar(c)
     }
 
     @Synchronized
