@@ -372,8 +372,24 @@ object AndroidAuto {
             m.isActive = true
             midia = m
             atualizarMidia()
+            // Diagnóstico do volante (03/11: "o botão de passar a música não funciona" e nenhuma tecla chegou aqui na
+            // viagem de 02/11): quem está na frente da fila de sessões de mídia recebe as teclas do volante.
+            Rede.principal.postDelayed({ anotarSessoes(ctx, "Android Auto ligou") }, 6_000)
         } catch (e: Throwable) {
             Registro.anotar("aa: sessão de mídia não abriu (${e.javaClass.simpleName})")
+        }
+    }
+
+    /** Lista as sessões de mídia ativas (a 1ª recebe as teclas de mídia). Precisa do acesso às notificações (Ouvinte). */
+    fun anotarSessoes(ctx: Context, quando: String) {
+        try {
+            val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as android.media.session.MediaSessionManager
+            val lista = msm.getActiveSessions(android.content.ComponentName(ctx, Ouvinte::class.java))
+            Registro.anotar("aa: sessões de mídia ($quando): " + lista.joinToString(" > ") {
+                "${it.packageName}(${it.playbackState?.state ?: "-"})"
+            }.ifEmpty { "nenhuma" })
+        } catch (e: Throwable) {
+            Registro.anotar("aa: não li as sessões de mídia (${e.javaClass.simpleName})")
         }
     }
 
