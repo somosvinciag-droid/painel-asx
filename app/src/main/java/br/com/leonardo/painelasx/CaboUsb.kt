@@ -243,6 +243,8 @@ object CaboUsb {
 
     /** Quedas rápidas seguidas (com resposta) antes de largar o cabo até ele ser solto. */
     private const val MAX_QUEDAS = 8
+    /** Depois de reiniciar o USB, o celular costuma voltar como outro aparelho em ~1 s; passou disto, plano B. */
+    private const val ESPERA_REINICIO_MS = 4_000L
     /** Pedidos de modo acessório (identidade do Android Auto) por plugada, contando a briga com o ZLink. */
     private const val MAX_TROCAS = 8
     /** Um 2d00 que aparece até este tempo depois de um pedido NOSSO é nosso; depois disso, é de outro app. */
@@ -304,6 +306,8 @@ object CaboUsb {
         var desistiu = false
         var avisouDesbloquear = false
         var ligou = false
+        /** Quedas seguidas do Android Auto em menos de 20 s depois do TLS (cada uma reinicia o USB): limite [MAX_QUEDAS]. */
+        var quedasRapidas = 0
         val zlink = ArrayList<String>()
     }
     @Volatile private var plugada: Plugada? = null
@@ -542,17 +546,34 @@ object CaboUsb {
      * [semTls] (Android Auto): respondeu à versão mas o TLS não terminou — como no Headunit Revived, pede de novo o
      * modo acessório (o Android Auto do celular recomeça do zero) em vez de reabrir o mesmo acessório.
      */
-    fun caboTerminou(ctx: Context, nome: String, respondeu: Boolean, durouMs: Long, semTls: Boolean = false) {
+    fun caboTerminou(ctx: Context, nome: String, respondeu: Boolean, durouMs: Long, semTls: Boolean = false, tlsOk: Boolean = false) {
         if (!usarCabo(ctx)) return
         val um = ctx.getSystemService(Context.USB_SERVICE) as UsbManager
         if (um.deviceList.values.none { it.deviceName == nome }) return   // soltou: espera a próxima plugada
         val aa = modo(ctx) == MODO_AA
-        // Android Auto que FUNCIONOU (passou do TLS) e caiu com o cabo plugado: reinicia o USB do celular em vez de reabrir
-        // o mesmo acessório. Ele volta como aparelho comum em ~1 s e o pedido do AA sai de novo ([tratar]).
-        if (aa && respondeu && (semTls || durouMs >= 20_000)) {
+        // Android Auto que passou do TLS (ou parou no meio dele) e caiu com o cabo plugado: reinicia o USB do celular em
+        // vez de reabrir o mesmo acessório. Reabrir não funciona: o celular continua mandando a conversa velha (02/11
+        // 18:20:43: "joguei fora 704224 bytes velhos" e "TLS: quadro cifrado antes da hora"). Antes, só depois de 20 s.
+        if (aa && respondeu && (semTls || tlsOk)) {
+            val p = plugadaAtual()
+            val rapidas = synchronized(this) {
+                if (tlsOk && durouMs < 20_000) ++p.quedasRapidas else { if (tlsOk) p.quedasRapidas = 0; p.quedasRapidas }
+            }
+            if (rapidas > MAX_QUEDAS) {
+                // Liga e cai logo, várias vezes seguidas: para até o cabo ser solto (nada de reiniciar para sempre).
+                val primeira = synchronized(this) { alheios.add(nome); if (p.desistiu) false else { p.desistiu = true; true } }
+                if (primeira) {
+                    aviso = "o Android Auto caiu logo depois de ligar $rapidas vezes seguidas; tire e ponha o cabo"
+                    Registro.anotar("cabo USB: $aviso (fico parado até o cabo ser solto)")
+                    Rede.naTela { try { Voz.falar("O Android Auto está caindo. Tire e ponha o cabo do celular.", Voz.Tipo.IMPORTANTE) } catch (_: Throwable) { } }
+                }
+                return
+            }
             val d = um.deviceList.values.firstOrNull { it.deviceName == nome }
             if (d != null && ehAcessorio(d) && reiniciarUsb(um, d)) {
-                Registro.anotar("cabo USB: o Android Auto caiu com o cabo plugado; reiniciei o USB do celular para começar do zero")
+                Registro.anotar("cabo USB: o Android Auto caiu com o cabo plugado; reiniciei o USB do celular para começar do zero" +
+                    if (rapidas > 0) " (queda rápida $rapidas de $MAX_QUEDAS)" else "")
+                planoB(ctx, um, nome)
                 return
             }
         }
@@ -633,6 +654,26 @@ object CaboUsb {
         } finally { try { c.close() } catch (_: Throwable) { } }
     }
 
+    /**
+     * Plano B do reinício do USB: o reinício "deu certo" mas o celular às vezes NÃO sai do modo acessório (02/11 18:20:44:
+     * nenhum "soltou" por 70 s e o Android Auto ficou parado até o Leonardo mexer no celular). Se em [ESPERA_REINICIO_MS] o
+     * mesmo aparelho continua no cabo (mesmo nome = não voltou do zero) e ninguém está conversando com ele, pede de novo o
+     * modo Android Auto (o celular volta do zero), dentro do limite de pedidos da plugada.
+     */
+    private fun planoB(ctx: Context, um: UsbManager, nome: String) {
+        linha.postDelayed({
+            try {
+                val d = um.deviceList.values.firstOrNull { it.deviceName == nome } ?: return@postDelayed   // voltou do zero: ok
+                if (!ehAcessorio(d) || AndroidAuto.conversandoCom(nome)) return@postDelayed
+                synchronized(this) { if (nome in alheios) return@postDelayed; trocarDeNovo.add(nome) }
+                Registro.anotar("cabo USB: o celular não saiu do modo acessório depois do reinício do USB; peço o modo Android Auto de novo")
+                tratar(ctx, d, DE_NOVO)
+            } catch (e: Throwable) {
+                Registro.anotar("ERRO cabo USB: plano B: ${e.javaClass.simpleName}")
+            }
+        }, ESPERA_REINICIO_MS)
+    }
+
     private val metodoReset: java.lang.reflect.Method? by lazy {
         try {
             // "Reflexão dupla": no Android 10 o método escondido é procurado como se fosse pelo próprio sistema.
@@ -699,6 +740,7 @@ object CaboUsb {
         if (aa && origem == PROCURA && ehAcessorio(d) && !AndroidAuto.ligado) {
             if (reiniciarUsb(um, d)) {
                 Registro.anotar("cabo USB: na partida o celular já estava no cabo (modo acessório antigo); reiniciei o USB dele")
+                planoB(ctx, um, d.deviceName)
                 return
             }
         }

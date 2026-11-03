@@ -148,9 +148,12 @@ object AndroidAuto {
         // Cabo ainda plugado (o celular fechou, a central dormiu...): abre de novo. Nunca respondeu = outro app.
         try {
             CaboUsb.caboTerminou(ctx, canal.nomeAparelho, s?.respondeu == true, SystemClock.elapsedRealtime() - inicio,
-                semTls = s != null && s.respondeu && !s.tlsOk)
+                semTls = s != null && s.respondeu && !s.tlsOk, tlsOk = s?.tlsOk == true)
         } catch (_: Throwable) { }
     }
+
+    /** Há uma conversa (começando ou ligada) com este aparelho do cabo. */
+    fun conversandoCom(nome: String) = sessao != null && aparelho == nome
 
     /** Tamanho do vídeo combinado com o celular (a TelaAndroidAuto converte os toques para ele). */
     @Volatile private var tamanho = 800 to 480
