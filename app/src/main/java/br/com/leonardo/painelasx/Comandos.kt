@@ -46,10 +46,11 @@ object Comandos {
         var jarvis = false
         var t2 = t
         var original = falado.trim()
-        Regex("^(ok |ei |e ai |oi )?(jarvis|jarbas|jarvas|jervis|jerves|jarves|javis|jarvi|jarviz|jarbes|gervis|jarvez)( por favor)?\\b").find(t2)?.let { m ->
+        // Nome e saudação como o Whisper escreve ("Ei, Jerves!", "Hey, Jervos"): regra única no Corretor.
+        Corretor.INICIO_JARVIS_NORMALIZADO.find(t2)?.let { m ->
             jarvis = true
             t2 = t2.substring(m.range.last + 1).trim()
-            original = original.replace(Regex("^\\W*(ok|ei|e aí|e ai|oi)?\\W*(jarvis|jarbas|jarvas|jervis|jerves|jarves|javis|jarvi|jarviz|jarbes|gervis|jarvez)\\W*(por favor)?\\W*", RegexOption.IGNORE_CASE), "").trim()
+            original = original.replace(Corretor.INICIO_JARVIS, "").trim()
             if (t2.isEmpty()) return "Às suas ordens, senhor."
         }
         rapido(ctx, t2, original)?.let { return it }
@@ -87,6 +88,13 @@ object Comandos {
 
     /** Comandos novos (v14): lugares, música, rádio, diário, avisos, tempo. null = não é nenhum destes. */
     private fun rapido(ctx: Context, t: String, falado: String): String? {
+        // Ajuda falada. 02/11 21:39 o Whisper ouviu "quais são os opções de comum do você tem" e caiu no "não entendi".
+        if (Regex("^(ajuda|comandos|lista de comandos|me ajuda|socorro com os comandos)$").matches(t) ||
+            Regex("^(e )?(quais|qual) (sao |e )?(as |os )?(suas )?(opcoes|comandos)\\b").containsMatchIn(t) ||
+            Regex("^o que (voce|vc|tu) (sabe|pode|consegue) fazer\\b").containsMatchIn(t))
+            return "Eu posso traçar rotas, como: vamos pra casa. Tocar música, próxima e pausa. Dizer o tempo. " +
+                "Mudar o volume e o limite de velocidade. Anotar pedidos de clientes, criar lembretes e abrir apps. " +
+                "A lista completa está na tela do Painel."
         // "informações do app ZLink": abre a página do app nas Configurações (desativar, forçar parada).
         Regex("^(abre |abrir )?(as )?(informacoes|informacao|detalhes|pagina|configuracoes|ajustes) do (app|aplicativo) (.+)$").find(t)?.let {
             val nome = it.groupValues[5]
