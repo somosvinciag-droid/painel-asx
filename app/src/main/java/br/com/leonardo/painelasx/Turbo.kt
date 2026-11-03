@@ -23,8 +23,18 @@ object Turbo {
         return mi.availMem / (1024 * 1024)
     }
 
-    /** Devolve a frase do resultado ("Liberei 320 MB..."). Pode demorar 1-2 s: chame fora da tela principal se der. */
+    private val rodando = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Devolve a frase do resultado ("Liberei 320 MB..."). Pode demorar 1-2 s: chame fora da tela principal se der.
+     * Uma limpeza por vez (02/11 21:28: 6 seguidas em 8 s, "liberei 0 mb", cada uma passando por todos os apps).
+     */
     fun limpar(ctx: Context): String {
+        if (!rodando.compareAndSet(false, true)) return "Turbo: já estou liberando a memória."
+        try { return limparAgora(ctx) } finally { rodando.set(false) }
+    }
+
+    private fun limparAgora(ctx: Context): String {
         val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val antes = livreMb(am)
         val teclado = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
