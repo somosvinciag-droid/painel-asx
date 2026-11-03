@@ -482,3 +482,37 @@ Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica
 - Ideia não feita (só com teste no carro): a central é `musb-hdrc`; se as quedas continuarem SÓ com o canal ADB ligado,
   suspeitar das leituras ADB com prazo de 1 s (cancelamento de URB no MUSB) e passar o ADB também para pedido assíncrono
   (precisa de uma linha única que colhe os pedidos das duas interfaces).
+
+## v36: lê tudo do carro (só leitura)
+- **TUDO em v36 é SOMENTE LEITURA.** Nada escreve no MCU/carro. `DadosCarro.kt` (novo) só escuta avisos, lê ajustes
+  (Settings) e registra os callbacks de LEITURA do CanService. Cada dado vai para o Registro com o prefixo **"carro:"**
+  (o Claude lê por `registro_central` filtro "carro:") e o último valor de cada sinal entra na seção de diagnóstico
+  **"--- dados do carro (v36) ---"** (`diagnostico_central`). Nenhum comando/tecla é enviado; nenhum ajuste é mudado.
+- Ligado de dentro do **Ouvinte** (NotificationListenerService — sobrevive ao force-stop da central) e também na partida
+  (`ServicoFixo`, linha `inicio`). `DadosCarro.iniciar` é idempotente, roda numa `HandlerThread` própria, try/catch em tudo.
+- **O que o coletor capta (e como ler pelo conector):**
+  - *Avisos (broadcast), `registerReceiver` explícito + sticky:* tensão da bateria (`ACTION_CAN_BATTERY_VOLTAGE`, Bundle
+    inteiro); faróis/ill (`ACTION_ILL_STATE_CHANGE`, `ACTION_BACKLIGHT_SWITCH_CHANGE`); **teclas do volante**
+    (`ACTION_KEY_VALUE`, `ACTION_TEST_KEY` — só o CÓDIGO, nunca reenviado); portas (`ACTION_CAN_DOOR_STATE_CHANGE`,
+    `ACTION_CAN_DOOR_WINDOW`); radar (`ACTION_CAN_RADAR_STATE_CHANGE`, `ACTION_BACK_SHOW_RADAR`); mídia
+    (`ACTION_STREAM_MUSIC`, `MEDIA_LIST_CHANGE`); **ligação BT** (`ACTION_BT_BEGIN_CALL_ONLINE/_INCOMING/_END/_OUTGOING`
+    — SÓ o estado, NUNCA número/contato); USB/SD (`ACTION_TIPS_INSERT_USB/_SD/_DISK/_CONNECT_IPOD`); energia (`ACTION_MCU_STATE_CHANGE`).
+  - *Ajustes (`Settings.System`) por `query` + `ContentObserver` (notifyForDescendants):* `mcu_backcar_state`,
+    `mcu_system_volume`, `key_top_app`, `mcu_current_source`, `mcu_state`, e varre o `CONTENT_URI` filtrando
+    nwd/mcu/acc/volt/batt/back/vol/white/source/top (descobre os nomes reais). Só leitura.
+  - *CanService:* UM bind só-leitura (`com.nwd.can.setting`/`CanService`, ação `...ACTION_CAN_SERVICE`, AIDL
+    `ICanRemote4OuterFeature`, canal `nwdthirdapp` + segredo, `initSdkCfg` tx 2, callbacks de LEITURA 9/11/15/17/23/27).
+    Decodifica carInfo (vel, rpm, combustível, tensão, marcha, freio de mão, cinto, pisca, faróis, portas, coolant),
+    ar, portas, radar. Se o serviço não existir/bind recusado -> "carro: CAN não disponível"; se ligar mas não vier dado
+    em 20 s -> "carro: CAN vazio — provável sem caixa de CAN no ASX". Nunca derruba o app.
+  - `LeitorCarro.PALAVRAS_SINAL` ampliada: + bms, volt, batt, sensor, native.reverse, source, top_app, can (pega mais
+    props no getprop sem receiver novo).
+- **Roteiro de 1 passeio (o Leonardo faz, depois o Claude lê por `registro_central` "carro:" + `diagnostico_central`):**
+  ligar a chave (ACC), dar a partida, apertar CADA botão do volante (um a um), girar o botão de volume, engatar a ré
+  parado, acender e apagar o farol, play/pause na música, abrir o Spotify e a câmera de ré, desligar. Isso preenche de
+  uma vez os códigos de tecla do volante, os nomes reais das chaves de Settings, e confirma quais avisos/CAN chegam.
+- Correções de bug seguras juntas nesta versão: `Turbo.limpar` por voz/Claude agora roda em segundo plano (não trava a
+  tela) e fala o resultado; `CaboUsb.hora` (SimpleDateFormat) virou `ThreadLocal` (thread-safe); o vigia do Controle
+  (`ServicoFixo.olharControle`) agora É iniciado, mas o aviso "Controle desligado → Religar" só aparece depois de uma
+  ATUALIZAÇÃO (pref `config/controle_versao` = VERSION_CODE da última vez com o Controle ligado; soneca/partida com a
+  mesma versão fica calada, como manda o CLAUDE.md).

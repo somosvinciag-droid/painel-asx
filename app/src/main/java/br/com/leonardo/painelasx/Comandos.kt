@@ -398,7 +398,9 @@ object Comandos {
         // Turbo (liberar memoria)
         if (t.contains("turbo") || t.contains("limpa a memoria") || t.contains("limpar memoria") ||
             t.contains("limpa memoria") || t.contains("libera memoria") || t.contains("liberar memoria")) {
-            return Turbo.limpar(ctx)
+            // Fora da linha principal: o Turbo passa por todos os apps e dormia a tela 1-2 s (ANR no hardware fraco).
+            Rede.emSegundoPlano("turbo") { Voz.falar(Turbo.limpar(ctx), Voz.Tipo.RESPOSTA) }
+            return "Liberando a memória..."
         }
 
         // Rotina

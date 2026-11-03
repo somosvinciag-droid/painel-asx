@@ -58,6 +58,9 @@ object Diagnostico {
         sb.append("\n--- zlink ---\n")
         sb.append(try { br.com.leonardo.painelasx.zlink.DiagnosticoZlink.paraDiagnostico(ctx, completo) } catch (e: Throwable) { "(não consegui ler: ${e.javaClass.simpleName})\n" })
 
+        sb.append("\n--- dados do carro (v36) ---\n")
+        sb.append(try { DadosCarro.diagnostico() } catch (e: Exception) { "(não consegui ler: ${e.javaClass.simpleName})\n" })
+
         sb.append("\n--- abriu na partida ---\n")
         sb.append(try { Partida.texto(ctx) } catch (e: Exception) { "(não consegui ler: ${e.javaClass.simpleName})\n" })
 

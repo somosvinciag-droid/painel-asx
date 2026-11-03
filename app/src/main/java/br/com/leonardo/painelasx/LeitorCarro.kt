@@ -77,7 +77,9 @@ object LeitorCarro {
     /** Ajustes internos da central que podem mudar com o carro (ré, faróis, chave...). */
     private val PALAVRAS_SINAL = listOf(
         "reverse", "backcar", "back.car", "quickcar", "acc", "illum", "light", "lamp", "brake",
-        "gear", "mcu", "nwd.car", "park", "radar", "door", "speed", "steer", "key"
+        "gear", "mcu", "nwd.car", "park", "radar", "door", "speed", "steer", "key",
+        // v36: mais ajustes do getprop ligados ao carro
+        "bms", "volt", "batt", "sensor", "native.reverse", "source", "top_app", "can"
     )
     private val propsAtuais = HashMap<String, String>()
     private val mudancas = ArrayDeque<String>()

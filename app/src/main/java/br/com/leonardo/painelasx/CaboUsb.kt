@@ -518,7 +518,7 @@ object CaboUsb {
                 val p = plugada
                 synchronized(zlinkVistos) {
                     if (zlinkVistos.lastOrNull()?.endsWith(linhaZ) == true) return
-                    zlinkVistos.addLast(hora.format(Date()) + " " + linhaZ)
+                    zlinkVistos.addLast(horaStr() + " " + linhaZ)
                     while (zlinkVistos.size > 12) zlinkVistos.removeFirst()
                 }
                 if (p != null && p.zlink.size < 8) {
@@ -868,7 +868,12 @@ object CaboUsb {
 
     private fun hex(d: UsbDevice) = "%04x:%04x".format(d.vendorId, d.productId)
 
-    private val hora = SimpleDateFormat("dd/MM HH:mm:ss", Locale("pt", "BR"))
+    // SimpleDateFormat não é thread-safe: o receptor USB/ZLink (linha cabo-rapido) e o diagnóstico (linha do conector)
+    // formatavam a MESMA instância ao mesmo tempo -> exceção rara dentro do format. Uma por thread resolve.
+    private val hora = object : ThreadLocal<SimpleDateFormat>() {
+        override fun initialValue() = SimpleDateFormat("dd/MM HH:mm:ss", Locale("pt", "BR"))
+    }
+    private fun horaStr() = hora.get()!!.format(Date())
 
     private fun descrever(d: UsbDevice): String {
         val sb = StringBuilder(hex(d))
@@ -885,7 +890,7 @@ object CaboUsb {
 
     /** Anota todo aparelho plugado/solto (sem o limite de 1 por minuto do LeitorCarro). */
     private fun anotar(acao: String, d: UsbDevice) {
-        val linha = hora.format(Date()) + " " + acao + " " + descrever(d)
+        val linha = horaStr() + " " + acao + " " + descrever(d)
         synchronized(vistos) {
             vistos.addLast(linha)
             while (vistos.size > 12) vistos.removeFirst()

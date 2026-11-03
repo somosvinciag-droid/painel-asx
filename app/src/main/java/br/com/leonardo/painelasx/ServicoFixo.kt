@@ -79,7 +79,10 @@ class ServicoFixo : Service() {
             medirInicio("atualizador") { Atualizador.agendar(app) }
             medirInicio("lugares") { Lugares.iniciar(app) }
             medirInicio("leitor do carro") { LeitorCarro.iniciar(app) }
+            medirInicio("dados do carro") { DadosCarro.iniciar(app) }
         }, "inicio").start()
+        // Vigia do Controle (v36): só começa uma vez; o aviso "religar" só aparece depois de uma ATUALIZAÇÃO.
+        if (!vigiando) { vigiando = true; vigia.postDelayed(olharControle, 30_000) }
         try {
             registerReceiver(desligando, android.content.IntentFilter(Intent.ACTION_SHUTDOWN))
         } catch (_: Exception) {
@@ -91,18 +94,36 @@ class ServicoFixo : Service() {
         override fun onReceive(c: android.content.Context, i: Intent) = Viagens.centralDesligando()
     }
 
-    /** A cada 30 s: se o Controle estiver desligado, mostra o aviso "toque para religar". */
+    /**
+     * A cada 30 s olha o Controle (Acessibilidade).
+     * REGRA (v36): o Controle cair em partidas/sonecas é NORMAL e "sem alerta" (CLAUDE.md). O aviso "religar" só
+     * aparece depois de uma ATUALIZAÇÃO do app — que é quando a central desliga a Acessibilidade e o modelo de
+     * atualização precisa que o Leonardo religue. Como sabemos que atualizou: guardamos em "config/controle_versao"
+     * o VERSION_CODE da última vez em que o Controle estava LIGADO. Se agora está desligado e aquela versão é menor
+     * que a de agora (ou nunca foi guardada), houve atualização desde a última vez ligada -> avisa. Depois que o
+     * Leonardo religa, guardamos a versão de agora, então as sonecas seguintes (mesma versão) ficam caladas.
+     */
     private val vigia = android.os.Handler(android.os.Looper.getMainLooper())
     private var avisou = false
+    @Volatile private var vigiando = false
     private val olharControle = object : Runnable {
         override fun run() {
             try {
+                val p = getSharedPreferences("config", Context.MODE_PRIVATE)
                 if (Controle.ligado(this@ServicoFixo)) {
                     if (avisou) { Avisos.limpar(this@ServicoFixo, Avisos.ID_CONTROLE); avisou = false }
-                } else if (!avisou) {
-                    Avisos.controleDesligado(this@ServicoFixo)
-                    Registro.anotar("aviso: Controle desligado, pedi para religar")
-                    avisou = true
+                    if (p.getInt("controle_versao", 0) != BuildConfig.VERSION_CODE)
+                        p.edit().putInt("controle_versao", BuildConfig.VERSION_CODE).apply()
+                } else {
+                    val versaoLigado = p.getInt("controle_versao", 0)
+                    val atualizou = versaoLigado < BuildConfig.VERSION_CODE
+                    if (atualizou && !avisou) {
+                        Avisos.controleDesligado(this@ServicoFixo)
+                        Registro.anotar("aviso: Controle desligado DEPOIS de atualizar (era v$versaoLigado, agora v${BuildConfig.VERSION_CODE}), pedi para religar")
+                        avisou = true
+                    } else if (!atualizou && avisou) {
+                        Avisos.limpar(this@ServicoFixo, Avisos.ID_CONTROLE); avisou = false
+                    }
                 }
             } catch (_: Exception) {
             }

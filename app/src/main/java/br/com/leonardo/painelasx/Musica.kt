@@ -270,6 +270,8 @@ class Ouvinte : NotificationListenerService() {
         val idade = (android.os.SystemClock.elapsedRealtime() - App.inicio) / 1000
         Registro.anotar("anjo da guarda: religado pelo sistema (app aberto há ${idade}s)")
         ServicoFixo.iniciar(app)
+        // v36: liga o coletor de dados do carro aqui também (o Ouvinte sobrevive ao force-stop da central).
+        try { DadosCarro.iniciar(app) } catch (_: Throwable) { }
         Thread {
             val estado = Despertador.estadoMcu()
             if (estado != "3" && Jarvis.devoSaudar(app)) {
