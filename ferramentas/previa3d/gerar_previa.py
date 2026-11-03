@@ -504,6 +504,26 @@ def calcular_rota(vias, areas, lugares, pistas=(), altura=None):
             f *= 8.0     # a volta não repete a ida: a rota vira um laço
         return f * (1.6 if vias[vi]["terra"] else 1.0)
 
+    pq = [ar for ar in areas if "parque das aguas" in sem_acento(ar[3])]
+    if not pq:
+        # no OSM o parque está como leisure=park SEM nome: é o parque que tem as fontes (Fonte Dom Pedro, Geiser...)
+        fontes = [Point(l[0], l[1]) for l in lugares if l[3] == "fountain" or "balneario" in sem_acento(l[2])]
+        melhor, mc = None, 1
+        for i, ar in enumerate(areas):
+            if ar[0] != AREA_PARQUE or ar[3]:
+                continue
+            try:
+                pg = Polygon(ar[1]).buffer(0)
+            except Exception:
+                continue
+            c = sum(1 for f in fontes if pg.contains(f))
+            if c > mc:
+                melhor, mc = i, c
+        if melhor is not None:
+            tipo, ext, ints, _ = areas[melhor]
+            areas[melhor] = (tipo, ext, ints, "Parque das Águas")
+            pq = [areas[melhor]]
+            print(f"Parque das Águas = parque sem nome do OSM com {mc} fontes dentro", file=sys.stderr)
     alvos = []
     rotulos = []
     if ROTA:
@@ -529,25 +549,6 @@ def calcular_rota(vias, areas, lugares, pistas=(), altura=None):
             rotulos.append("centro")
         # Parque das Águas: contorno pelos 4 lados
         pq = [ar for ar in areas if "parque das aguas" in sem_acento(ar[3])]
-        if not pq:
-            # no OSM o parque está como leisure=park SEM nome: é o parque que tem as fontes (Fonte Dom Pedro, Geiser...)
-            fontes = [Point(l[0], l[1]) for l in lugares if l[3] == "fountain" or "balneario" in sem_acento(l[2])]
-            melhor, mc = None, 1
-            for i, ar in enumerate(areas):
-                if ar[0] != AREA_PARQUE or ar[3]:
-                    continue
-                try:
-                    pg = Polygon(ar[1]).buffer(0)
-                except Exception:
-                    continue
-                c = sum(1 for f in fontes if pg.contains(f))
-                if c > mc:
-                    melhor, mc = i, c
-            if melhor is not None:
-                tipo, ext, ints, _ = areas[melhor]
-                areas[melhor] = (tipo, ext, ints, "Parque das Águas")
-                pq = [areas[melhor]]
-                print(f"Parque das Águas = parque sem nome do OSM com {mc} fontes dentro", file=sys.stderr)
         caixa = None
         if pq:
             pg = Polygon(max(pq, key=lambda ar: Polygon(ar[1]).area)[1])

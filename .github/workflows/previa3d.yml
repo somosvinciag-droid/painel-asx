@@ -22,7 +22,10 @@ jobs:
       R_RUAS: "3000"
       R_DEM: "3000"
       PASSO_DEM: "30"
-      ROTA: ""
+      # Rota de exemplo (lat,lon;...): sai da Rua Major Penha, desce pela Av. Camilo Soares ao lado do Parque das Águas,
+      # contorna pelo sul (Av. Evaristo de Sá Guedes), volta pela Av. Getúlio Vargas e sobe a Ladeira Luiz Guimarães.
+      # Vazio = escolha automática (laço em volta do parque).
+      ROTA: "-21.979248,-44.932485;-21.985993,-44.937431;-21.986893,-44.932000;-21.981497,-44.929576;-21.979248,-44.932485"
     steps:
       - uses: actions/checkout@v4
 
