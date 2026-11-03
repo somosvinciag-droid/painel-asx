@@ -438,6 +438,14 @@ class AaSessao(
     private fun quadro(canal: Int, flags: Int, total: Int, b: ByteArray, ini: Int, n: Int) {
         if (fim.get()) return
         val m = motor ?: return
+        // Cabeçalho impossível (flags só usam os 4 bits de baixo; anunciamos os canais 0 a 10): o fluxo do cabo se
+        // desalinhou (bytes perdidos no USB, 02/11 "canal 136/88/19"). Nada mais desta conversa vai ser lido certo:
+        // encerra já (a central reinicia o USB e reconecta) em vez de esperar o TLS tropeçar.
+        if (flags and 0xF0 != 0 || canal > 15) {
+            ev.registro("aa: cabeçalho impossível (canal $canal, flags $flags, $n bytes; quadro ${quadrosLidos + 1}): bytes perdidos no cabo")
+            encerrar("o fluxo do cabo se desalinhou (bytes perdidos no USB)")
+            return
+        }
         if (flags and AaQuadro.CIFRADO == 0) {
             // Aberto depois do TLS. Pedaço atrasado do aperto de mão (ex.: TLS 1.3 manda o "ticket" depois):
             // passa pelo motor TLS para a numeração dos registros não se perder. O resto (versão atrasada) é ignorado.
