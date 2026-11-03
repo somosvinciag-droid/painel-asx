@@ -470,6 +470,8 @@ Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica
   configuração USB do celular. Provável HyperOS reaplicando o USB depois de ligar a depuração / do "Permitir" sem "Sempre".
 - Jarvis: `Corretor.NOME_JARVIS`/`SAUDACAO` (uma regra para Corretor e Comandos: "Hey, Jervos", "Olá Jarvis", "Jérvis";
   "Gabi me ligou" não vira Jarvis). Ajuda falada: "ajuda", "quais são as opções/comandos", "o que você sabe fazer".
+  "Previsão" (com erros do Whisper, "…vosão do tempo") é o clima ANTES da música ("coloca pra vosão do tempo" ia para o
+  Spotify); anotações/pedidos/lembretes com "tempo"/"previsão" não viram clima; "toca O Tempo Não Para" segue música.
 - `TelaAndroidAuto.Decodificador`: erros seguidos → `codec.reset()` + configuração + imagem inteira (até 3 vezes; depois
   solta o vídeo); quadro perdido (fila cheia / 200 ms sem vaga) → espera SPS/IDR por até 3 s (sem borrão).
   `onNewIntent` liga o decodificador a uma conversa nova com a tela já aberta.
