@@ -51,9 +51,11 @@ jobs:
       - name: Relevo (Copernicus DEM GLO-30, AWS)
         run: |
           set -euo pipefail
-          T=Copernicus_DSM_COG_10_S22_00_W045_00_DEM
-          curl -fsSL --retry 5 -o w/dem.tif "https://copernicus-dem-30m.s3.amazonaws.com/$T/$T.tif"
-          ls -la w/dem.tif
+          # Caxambu fica perto de 22°S: precisa do quadro S22 (22°S a 21°S) e do S23 (o sul da área passa de 22°S)
+          for T in Copernicus_DSM_COG_10_S22_00_W045_00_DEM Copernicus_DSM_COG_10_S23_00_W045_00_DEM; do
+            curl -fsSL --retry 5 -o "w/$T.tif" "https://copernicus-dem-30m.s3.amazonaws.com/$T/$T.tif"
+          done
+          ls -la w/*.tif
 
       - name: Prédios (Microsoft Global ML Building Footprints)
         run: |
@@ -63,9 +65,17 @@ jobs:
       - name: Gerar os dados da prévia
         run: |
           set -euo pipefail
-          python3 -I ferramentas/previa3d/gerar_previa.py w/caxambu.osm.pbf w/dem.tif w/ms sai/previa.json 2>&1 | tee sai/resumo.txt
+          python3 -I ferramentas/previa3d/gerar_previa.py w/caxambu.osm.pbf w/Copernicus_DSM_COG_10_S22_00_W045_00_DEM.tif,w/Copernicus_DSM_COG_10_S23_00_W045_00_DEM.tif w/ms sai/previa.json 2>&1 | tee sai/resumo.txt
           gzip -9 -k sai/previa.json
           ls -la sai
+
+      - name: Dados no registro (base64 do previa.json.gz, para baixar pelo log)
+        run: |
+          set -euo pipefail
+          sha256sum sai/previa.json.gz
+          echo "=====INICIO-PREVIA3D====="
+          base64 -w 4000 sai/previa.json.gz
+          echo "=====FIM-PREVIA3D====="
 
       - uses: actions/upload-artifact@v4
         with:

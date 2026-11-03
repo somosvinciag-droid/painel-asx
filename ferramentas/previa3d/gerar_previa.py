@@ -92,6 +92,12 @@ class Leitor(osmium.SimpleHandler):
         self.areas = []     # (tipo, aneis externos, aneis internos, nome)
         self.agua_linhas = []
         self.lugares = []   # (x, y, nome, tipo)
+        self.pistas = []    # (x, y, nome, tags) de objetos com "parque"/"águas" no nome (para achar o Parque das Águas)
+
+    def pista(self, nome, x, y, t):
+        sa = sem_acento(nome)
+        if "parque" in sa or "aguas" in sa:
+            self.pistas.append((x, y, nome, dict((k, v) for k, v in t)))
 
     def node(self, n):
         t = n.tags
@@ -101,6 +107,7 @@ class Leitor(osmium.SimpleHandler):
         x, y = xy(n.location.lon, n.location.lat)
         if not dentro(x, y, R_PREDIOS):
             return
+        self.pista(nome, x, y, t)
         tipo = t.get("place") or t.get("amenity") or t.get("tourism") or t.get("leisure") or t.get("historic")
         if tipo:
             self.lugares.append((x, y, nome, tipo))
@@ -150,6 +157,17 @@ class Leitor(osmium.SimpleHandler):
         b = t.get("building")
         eh_predio = b is not None and b != "no"
         tipo = 0 if eh_predio else tipo_area(t)
+        if t.get("name"):
+            try:
+                for outer in a.outer_rings():
+                    ext = [xy(n.lon, n.lat) for n in outer]
+                    if ext:
+                        self.pista(t.get("name"), sum(p[0] for p in ext) / len(ext), sum(p[1] for p in ext) / len(ext), t)
+                        if tipo == 0 and not eh_predio and ("parque" in sem_acento(t.get("name"))):
+                            self.areas.append((AREA_PARQUE, ext, [], t.get("name")))
+                    break
+            except osmium.InvalidLocationError:
+                pass
         if not eh_predio and not tipo:
             return
         try:
@@ -187,17 +205,23 @@ class Leitor(osmium.SimpleHandler):
 
 # ---------------------------------------------------------------- relevo (Copernicus DEM)
 
-def ler_dem(caminho):
+def ler_dem(caminhos):
     import rasterio
-    from rasterio.windows import from_bounds
+    from rasterio.merge import merge
     lo0, la0 = lonlat(-R_DEM - 200, -R_DEM - 200)
     lo1, la1 = lonlat(R_DEM + 200, R_DEM + 200)
-    with rasterio.open(caminho) as src:
+    srcs = [rasterio.open(c) for c in caminhos.split(",") if os.path.exists(c)]
+    for src in srcs:
         print("DEM:", src.bounds, src.res, src.crs, file=sys.stderr)
-        jan = from_bounds(lo0, la0, lo1, la1, src.transform).round_offsets().round_lengths()
-        arr = src.read(1, window=jan).astype(np.float64)
-        tr = src.window_transform(jan)
-        res_lon, res_lat = src.res
+    mosaico, tr = merge(srcs, bounds=(lo0, la0, lo1, la1))
+    arr = mosaico[0].astype(np.float64)
+    ruim = ~np.isfinite(arr) | (arr < 1) | (arr > 9000)
+    if ruim.any():
+        print(f"DEM: {int(ruim.sum())} pixels sem dado (fora dos arquivos), preenchidos com a mediana", file=sys.stderr)
+        arr[ruim] = float(np.median(arr[~ruim]))
+    res_lon, res_lat = srcs[0].res
+    for src in srcs:
+        src.close()
     n = int(round(2 * R_DEM / PASSO_DEM)) + 1
     xs = np.linspace(-R_DEM, R_DEM, n)
     ys = np.linspace(R_DEM, -R_DEM, n)   # linha 0 = norte
@@ -460,16 +484,21 @@ def instrucoes(cam, pos, nome_aresta, rot_aresta, vias, grau):
     return pts, acum, nomes, final
 
 
-def calcular_rota(vias, areas, lugares):
+def calcular_rota(vias, areas, lugares, pistas=(), altura=None):
     adj, pos, nome_aresta, rot_aresta = montar_grafo(vias)
     grau = grau_nao_dirigido(adj)
-    # só nós com saída e entrada, dentro da área dos prédios
-    cands = [n for n in adj if adj[n] and grau.get(n, 0) >= 3 and dentro(*pos[n], R_PREDIOS - 150)]
+    # só nós com saída e entrada, dentro da área dos prédios, em ruas asfaltadas comuns
+    boas = set()
+    for v in vias:
+        if v["classe"] <= 6 and not v["terra"]:
+            boas.update(v["ids"])
+    cands = [n for n in adj if adj[n] and grau.get(n, 0) >= 3 and n in boas and dentro(*pos[n], R_PREDIOS - 150)]
     classe_de = {vi: v["classe"] for vi, v in enumerate(vias)}
 
     def penal(vi):
         c = classe_de[vi]
-        return {0: 0.9, 1: 0.9, 2: 0.92, 3: 0.95, 4: 0.97, 5: 1.0, 6: 1.05, 7: 1.4}.get(c, 1.5)
+        f = {0: 0.9, 1: 0.9, 2: 0.92, 3: 0.95, 4: 0.97, 5: 1.0, 6: 1.05, 7: 1.4}.get(c, 1.5)
+        return f * (1.6 if vias[vi]["terra"] else 1.0)
 
     alvos = []
     rotulos = []
@@ -492,23 +521,40 @@ def calcular_rota(vias, areas, lugares):
             rotulos.append("centro")
         # Parque das Águas: contorno pelos 4 lados
         pq = [ar for ar in areas if "parque das aguas" in sem_acento(ar[3])]
+        caixa = None
         if pq:
             pg = Polygon(max(pq, key=lambda ar: Polygon(ar[1]).area)[1])
-            x0, y0, x1, y1 = pg.bounds
+            caixa = pg.bounds
+        else:
+            pp = [pi for pi in pistas if "parque das aguas" in sem_acento(pi[2])]
+            if pp:
+                cx = sum(pi[0] for pi in pp) / len(pp)
+                cy = sum(pi[1] for pi in pp) / len(pp)
+                caixa = (cx - 170, cy - 170, cx + 170, cy + 170)
+                print(f"Parque das Águas só como ponto ({len(pp)} pistas); caixa de 340 m", file=sys.stderr)
+        if caixa:
+            x0, y0, x1, y1 = caixa
             cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
             print(f"Parque das Águas: {x1 - x0:.0f} x {y1 - y0:.0f} m, centro ({cx:.0f},{cy:.0f})", file=sys.stderr)
             folga = 25
             lados = [(cx, y1 + folga, "norte"), (x1 + folga, cy, "leste"), (cx, y0 - folga, "sul"), (x0 - folga, cy, "oeste")]
-            # começa pelo lado mais perto do ponto A, no sentido horário
             k = min(range(4), key=lambda i: math.dist(lados[i][:2], alvos[0]))
             for d in range(4):
                 lx, ly, nm = lados[(k + d) % 4]
                 alvos.append((lx, ly))
                 rotulos.append("Parque das Águas (" + nm + ")")
         else:
-            print("Parque das Águas não achado no OSM; uso um ponto a 700 m", file=sys.stderr)
-            alvos.append((alvos[0][0] + 700, alvos[0][1] + 200))
-            rotulos.append("ponto a 700 m")
+            cx, cy = alvos[0][0] + 500, alvos[0][1]
+            print("Parque das Águas não achado no OSM; uso um ponto a 500 m", file=sys.stderr)
+            alvos.append((cx, cy))
+            rotulos.append("ponto a 500 m")
+        # subida: o cruzamento mais alto a até 900 m do parque (para mostrar o relevo)
+        if altura is not None:
+            perto = [n for n in cands if 350 < math.dist(pos[n], (cx, cy)) < 900]
+            if perto:
+                alto = max(perto, key=lambda n: altura(*pos[n]))
+                alvos.append(pos[alto])
+                rotulos.append(f"subida ({altura(*pos[alto]):.0f} m)")
         alvos.append(alvos[0])
         rotulos.append(rotulos[0])
     nos = []
@@ -669,7 +715,18 @@ def main():
     print(f"Prédios: {cont}", file=sys.stderr)
 
     # ---- rota
-    rpts, racum, rnomes, ins = calcular_rota(ld.vias, ld.areas, ld.lugares)
+    for pi in ld.pistas:
+        print(f"  pista: {pi[2]} em ({pi[0]:.0f},{pi[1]:.0f}) {pi[3]}", file=sys.stderr)
+
+    def altura(x, y):
+        fi = (x + R_DEM) / PASSO_DEM
+        fj = (R_DEM - y) / PASSO_DEM
+        i = min(n - 2, max(0, int(fi)))
+        j = min(n - 2, max(0, int(fj)))
+        u, v = fi - i, fj - j
+        return float(h[j, i] * (1 - u) * (1 - v) + h[j, i + 1] * u * (1 - v) + h[j + 1, i] * (1 - u) * v + h[j + 1, i + 1] * u * v)
+
+    rpts, racum, rnomes, ins = calcular_rota(ld.vias, ld.areas, ld.lugares, ld.pistas, altura)
     print(f"Rota: {racum[-1]:.0f} m, {len(rpts)} pontos, {len(ins)} instruções", file=sys.stderr)
     for x in ins:
         print(f"  {x['s']:5d} m  {x['texto']}", file=sys.stderr)
