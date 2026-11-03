@@ -142,6 +142,15 @@ object Comandos {
         }
         if (t == "favoritos" || t == "meus favoritos" || t.startsWith("quais sao os favoritos")) return Lugares.texto(ctx)
 
+        // Anotações e lembretes podem falar de "tempo"/"previsão" ("anota que a previsão de entrega é amanhã"): não são o clima.
+        val anotacao = Regex("^(anota|anote|anotar|nota|lembra|lembrar|registra|pedido|me avisa|me lembra)\\b").containsMatchIn(t)
+        // "Coloca a previsão do tempo": é o clima, não uma música. 02/11 18:26 o Whisper ouviu "coloca pra vosão do tempo"
+        // e isso caía na busca do Spotify ("pra vosão" de "tempo"). Por isso vem ANTES da música.
+        if (!anotacao && (Regex("pr[ei]v[iuoe]s[aã]o").containsMatchIn(t) || Regex("\\b\\w*v\\w*sao do tempo\\b").containsMatchIn(t))) {
+            Rede.emSegundoPlano("clima") { Clima.atualizar(ctx) }
+            return Clima.texto()
+        }
+
         // Música / rádio
         if (t.startsWith("para o radio") || t.startsWith("desliga o radio") || t == "para a radio" || t.startsWith("desliga a radio")) {
             return if (Musica.pararRadio()) "Rádio desligado." else "O rádio da internet não está tocando."
@@ -173,9 +182,9 @@ object Comandos {
 
         // Tempo
         // Teste 02/11: o Whisper ouviu "qual a privusão do tempo": "previsão" aceita erros e "… do tempo"/"o tempo" basta.
-        if (t.contains("vai chover") || Regex("pr[ei]v[iuoe]s[aã]o").containsMatchIn(t) || t.contains("como esta o tempo") ||
+        if (!anotacao && (t.contains("vai chover") || t.contains("como esta o tempo") ||
             t.contains("como ta o tempo") || Regex("\\b(d?o) tempo\\b").containsMatchIn(t) ||
-            t == "tempo" || t == "clima" || t.contains("temperatura")) {
+            t == "tempo" || t == "clima" || t.contains("temperatura"))) {
             Rede.emSegundoPlano("clima") { Clima.atualizar(ctx) }
             return Clima.texto()
         }
