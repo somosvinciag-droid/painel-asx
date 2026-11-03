@@ -357,7 +357,7 @@ def dijkstra(adj, pos, ini, fim, penal=None):
             continue
         for v, w, vi in adj.get(u, ()):
             # penaliza vias menores um pouco (rota "de carro", não por becos)
-            nd = d + w * (penal(vi) if penal else 1.0)
+            nd = d + w * (penal(vi, u, v) if penal else 1.0)
             if nd < dist.get(v, 1e18):
                 dist[v] = nd
                 ant[v] = u
@@ -495,9 +495,13 @@ def calcular_rota(vias, areas, lugares, pistas=(), altura=None):
     cands = [n for n in adj if adj[n] and grau.get(n, 0) >= 3 and n in boas and dentro(*pos[n], R_PREDIOS - 150)]
     classe_de = {vi: v["classe"] for vi, v in enumerate(vias)}
 
-    def penal(vi):
+    usados = set()
+
+    def penal(vi, u=None, v=None):
         c = classe_de[vi]
         f = {0: 0.9, 1: 0.9, 2: 0.92, 3: 0.95, 4: 0.97, 5: 1.0, 6: 1.05, 7: 1.4}.get(c, 1.5)
+        if (u, v) in usados:
+            f *= 8.0     # a volta não repete a ida: a rota vira um laço
         return f * (1.6 if vias[vi]["terra"] else 1.0)
 
     alvos = []
@@ -514,6 +518,10 @@ def calcular_rota(vias, areas, lugares, pistas=(), altura=None):
             mx = sum(p[0] for p in mp) / len(mp)
             my = sum(p[1] for p in mp) / len(mp)
             a = min(mp, key=lambda p: (p[0] - mx) ** 2 + (p[1] - my) ** 2)
+            ids_mp = {i for v in vias if "major penha" in sem_acento(v["nome"]) for i in v["ids"]}
+            na_rua = [n for n in cands if n in ids_mp]
+            if na_rua:
+                a = pos[min(na_rua, key=lambda n: math.dist(pos[n], a))]
             alvos.append(a)
             rotulos.append("Rua Major Penha")
         else:
@@ -557,37 +565,23 @@ def calcular_rota(vias, areas, lugares, pistas=(), altura=None):
             print(f"Parque das Águas: {x1 - x0:.0f} x {y1 - y0:.0f} m, centro ({cx:.0f},{cy:.0f})", file=sys.stderr)
             folga = 25
             lados = [(cx, y1 + folga, "norte"), (x1 + folga, cy, "leste"), (cx, y0 - folga, "sul"), (x0 - folga, cy, "oeste")]
-            k = min(range(4), key=lambda i: math.dist(lados[i][:2], alvos[0]))
-            for d in range(4):
-                lx, ly, nm = lados[(k + d) % 4]
-                alvos.append((lx, ly))
-                rotulos.append("Parque das Águas (" + nm + ")")
+            k = max(range(4), key=lambda i: math.dist(lados[i][:2], alvos[0]))
+            lx, ly, nm = lados[k]
+            alvos.append((lx, ly))
+            rotulos.append("Parque das Águas (lado " + nm + ")")
         else:
             cx, cy = alvos[0][0] + 500, alvos[0][1]
             print("Parque das Águas não achado no OSM; uso um ponto a 500 m", file=sys.stderr)
             alvos.append((cx, cy))
             rotulos.append("ponto a 500 m")
-        # subida: o cruzamento mais alto a até 900 m do parque (para mostrar o relevo)
-        if altura is not None:
-            perto = [n for n in cands if 350 < math.dist(pos[n], (cx, cy)) < 900]
-            if perto:
-                alto = max(perto, key=lambda n: altura(*pos[n]))
-                alvos.append(pos[alto])
-                rotulos.append(f"subida ({altura(*pos[alto]):.0f} m)")
         alvos.append(alvos[0])
         rotulos.append(rotulos[0])
-    cam = rota_por(alvos, rotulos, cands, pos, adj, penal)
-    comp = sum(math.dist(pos[a], pos[b]) for a, b in zip(cam, cam[1:]))
-    if not ROTA and comp > 4600 and any(r.startswith("subida") for r in rotulos):
-        print(f"  rota com a subida ficou com {comp:.0f} m; tiro a subida", file=sys.stderr)
-        k = [i for i, r in enumerate(rotulos) if r.startswith("subida")][0]
-        del alvos[k], rotulos[k]
-        cam = rota_por(alvos, rotulos, cands, pos, adj, penal)
+    cam = rota_por(alvos, rotulos, cands, pos, adj, penal, usados)
     pts, acum, nomes, ins = instrucoes(cam, pos, nome_aresta, rot_aresta, vias, grau)
     return pts, acum, nomes, ins
 
 
-def rota_por(alvos, rotulos, cands, pos, adj, penal):
+def rota_por(alvos, rotulos, cands, pos, adj, penal, usados):
     nos = []
     for (x, y), r in zip(alvos, rotulos):
         n, d = no_mais_perto(cands, pos, x, y)
@@ -602,6 +596,9 @@ def rota_por(alvos, rotulos, cands, pos, adj, penal):
             print(f"  sem caminho entre {a} e {b}; pulo", file=sys.stderr)
             continue
         cam += p[1:]
+        for u, v in zip(p, p[1:]):
+            usados.add((u, v))
+            usados.add((v, u))
     return tirar_idas_e_voltas(cam)
 
 
