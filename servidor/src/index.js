@@ -3,7 +3,9 @@
 // Duas pontas:
 //  - /app/*        a central (app Painel ASX) manda o estado e os erros e busca comandos.
 //  - /mcp/<token>  o Claude (claude.ai) usa as ferramentas do conector.
-// Tudo fica num Durable Object ("Central"): um so para o carro.
+// Cada APARELHO tem o seu proprio Durable Object ("Central"): um cofre separado com estado,
+// registro, fila de comandos e link. O CARRO e o aparelho 'asx' e nada muda para ele (ver o
+// roteamento no fetch abaixo). Um aparelho novo (ex.: o Redmi) usa o prefixo /d/<aparelho>.
 //
 // Seguranca:
 //  - A central se registra uma vez com uma chave aleatoria gerada no proprio aparelho.
@@ -13,7 +15,27 @@
 
 export default {
   async fetch(request, env) {
-    const id = env.CENTRAL.idFromName('asx');
+    // ------------------------------------------------------- roteamento por APARELHO
+    // Cada aparelho cai no seu proprio cofre (Durable Object), escolhido pelo NOME do aparelho.
+    //
+    //   /mcp/<token>           e  /app/*            -> aparelho 'asx'  (o CARRO de sempre)
+    //   /d/<aparelho>/mcp/...  e  /d/<aparelho>/app/* -> aparelho <aparelho> (ex.: 'redmi')
+    //
+    // Sem o prefixo /d/<aparelho>, o nome e SEMPRE 'asx'. Assim o carro continua caindo no
+    // MESMO cofre de antes (com todo o estado, backup e registro dele) e nunca divide vaga com
+    // ninguem. So um aparelho que mande o prefixo /d/<aparelho> vai para outro cofre.
+    const url = new URL(request.url);
+    let nome = 'asx';
+    // nome do aparelho: comeca com letra/numero, 1 a 32 caracteres, so letras, numeros e hifen.
+    const m = url.pathname.match(/^\/d\/([a-z0-9][a-z0-9-]{0,31})(\/.*)?$/i);
+    if (m) {
+      nome = m[1].toLowerCase();
+      // Tira o prefixo /d/<aparelho> para o cofre ver o caminho normal (/mcp/... ou /app/...),
+      // sem precisar mudar NADA no codigo do Durable Object.
+      url.pathname = m[2] || '/';
+      request = new Request(url.toString(), request);
+    }
+    const id = env.CENTRAL.idFromName(nome);
     return env.CENTRAL.get(id).fetch(request);
   }
 };
