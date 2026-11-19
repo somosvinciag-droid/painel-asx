@@ -531,3 +531,11 @@ Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica
   (velocidade), sem combustível/portas/RPM. Investigar depois.
 - Problema do dia (não é código): o Redmi chegou "travado" no modo acessório (2d01 no boot) e ficou caindo e voltando a
   cada 1–3 s em qualquer modo USB; reiniciar o CELULAR resolveu.
+
+## Conector do PC (`servidor/src/pc.js`, 19/11)
+- O mesmo Worker/Durable Object leva tarefas para o PC do Leonardo. Tudo do PC fica em chaves `pc*` do storage;
+  nada do carro muda. Rotas `/pc/registrar` (código de 6 dígitos), `/pc/pedidos` (espera 20 s), `/pc/andamento`,
+  `/pc/resultado`; o PC usa `Authorization: Bearer <chave>` (aqui só o sha256).
+- Ferramentas MCP: `ligar_pc` (confere o código: 15 min, 5 tentativas), `estado_pc`, `tarefa_no_pc`, `ver_tarefa_pc`,
+  `responder_tarefa_pc`, `cancelar_tarefa_pc`, `listar_tarefas_pc`. Aviso no celular pelo mesmo ntfy do carro.
+- O agente do PC está no repositório `editor-toledo-marketing` (`conector/agente_pc.py`, `docs/conector-pc.md`).

@@ -1,4 +1,6 @@
 // Painel ASX — conector entre o Claude do Leonardo e a central do carro. (publicado por conector.yml)
+// Também leva tarefas para o PC dele (pc.js: /pc/* e as ferramentas *_pc).
+import { ParteDoPC, PC_FERRAMENTAS, PC_INSTRUCOES } from './pc.js';
 //
 // Duas pontas:
 //  - /app/*        a central (app Painel ASX) manda o estado e os erros e busca comandos.
@@ -69,6 +71,7 @@ export class Central {
     this.env = env;
     this.esperandoComando = [];   // pedidos da central parados esperando comando
     this.esperandoResultado = {}; // id do comando -> funcao que entrega o resultado
+    this.pc = new ParteDoPC(this);  // tarefas do computador do Leonardo
   }
 
   async fetch(request) {
@@ -91,6 +94,7 @@ export class Central {
         if (p === '/app/jarvis') return await this.jarvis(request);
         return json({ erro: 'rota desconhecida' }, 404);
       }
+      if (p.startsWith('/pc/')) return await this.pc.rota(request, p, { json, sha256, iguais });
       if (p.startsWith('/mcp/')) return await this.mcp(request, p.slice('/mcp/'.length).replace(/\/+$/, ''));
       return new Response('Não encontrado', { status: 404 });
     } catch (e) {
@@ -386,6 +390,7 @@ export class Central {
 
   async ferramenta(nome, a) {
     const s = this.ctx.storage;
+    if (PC_FERRAMENTAS.some(f => f.name === nome)) return this.pc.ferramenta(nome, a, { sha256, iguais });
     if (nome === 'estado_central') {
       const [visto, estado, registrado] = [await s.get('visto'), await s.get('estado'), await s.get('registrado')];
       return {
@@ -517,17 +522,17 @@ export class Central {
             protocolVersion: (p.params && p.params.protocolVersion) || '2025-06-18',
             capabilities: { tools: { listChanged: false } },
             serverInfo: { name: 'painel-asx', title: 'Painel ASX — central do carro', version: '1.0.0' },
-            instructions: INSTRUCOES
+            instructions: INSTRUCOES + PC_INSTRUCOES
           }));
         } else if (p.method === 'ping') {
           if (temId) respostas.push(okMcp(id, {}));
         } else if (p.method === 'tools/list') {
-          respostas.push(okMcp(id, { tools: FERRAMENTAS }));
+          respostas.push(okMcp(id, { tools: TODAS }));
         } else if (p.method === 'tools/call') {
           let nome = p.params && p.params.name;
           const args = (p.params && p.params.arguments) || {};
-          if (args.acao && FERRAMENTAS.some(f => f.name === args.acao)) nome = args.acao;
-          if (!FERRAMENTAS.some(f => f.name === nome)) {
+          if (args.acao && TODAS.some(f => f.name === args.acao)) nome = args.acao;
+          if (!TODAS.some(f => f.name === nome)) {
             respostas.push(erroMcp(id, -32602, 'Ferramenta desconhecida: ' + nome));
           } else {
             let r;
@@ -589,3 +594,5 @@ const FERRAMENTAS = [
   { name: 'backup_do_carro', description: 'Quando foi o último backup na nuvem, lembretes pendentes no celular e se o Jarvis (conversa pela API) está ligado.', inputSchema: sem, annotations: { readOnlyHint: true } },
   { name: 'mapa_da_central', description: 'Mapa dos apps de fábrica da central (NWD, câmera, CAN, rádio, ZLink): nomes dos avisos internos que cada um usa, permissões e propriedades. Serve para descobrir de onde vêm os dados do carro.', inputSchema: sem, annotations: { readOnlyHint: true } }
 ];
+
+const TODAS = FERRAMENTAS.concat(PC_FERRAMENTAS);
