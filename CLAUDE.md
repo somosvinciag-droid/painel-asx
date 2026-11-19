@@ -536,6 +536,9 @@ Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica
 - O mesmo Worker/Durable Object leva tarefas para o PC do Leonardo. Tudo do PC fica em chaves `pc*` do storage;
   nada do carro muda. Rotas `/pc/registrar` (código de 6 dígitos), `/pc/pedidos` (espera 20 s), `/pc/andamento`,
   `/pc/resultado`; o PC usa `Authorization: Bearer <chave>` (aqui só o sha256).
-- Ferramentas MCP: `ligar_pc` (confere o código: 15 min, 5 tentativas), `estado_pc`, `tarefa_no_pc`, `ver_tarefa_pc`,
-  `responder_tarefa_pc`, `cancelar_tarefa_pc`, `listar_tarefas_pc`. Aviso no celular pelo mesmo ntfy do carro.
+- Ferramentas MCP: `ligar_pc` (confere o código: 15 min, 5 tentativas; `apelido`, `principal`), `estado_pc`, `ajustar_pc`,
+  `tarefa_no_pc`, `ver_tarefa_pc`, `responder_tarefa_pc`, `cancelar_tarefa_pc`, `listar_tarefas_pc`. Aviso no celular pelo ntfy do carro.
+- VÁRIOS PCs (o Leonardo usa 2): lista `pcs` [{id, hash, nome (hostname), apelido, principal}], fila/visto/info por PC
+  (`pcFila:<id>`, `pcVisto:<id>`, `pcInfo:<id>`), cada tarefa guarda `pc`. Sem `pc` a tarefa vai para o PRINCIPAL (o PC DELE).
+  Mesmo hostname com chave nova = troca a chave e mantém apelido. O PC "DESKTOP-UU83OER" (usuário Gabriela Landim) NÃO é o dele.
 - O agente do PC está no repositório `editor-toledo-marketing` (`conector/agente_pc.py`, `docs/conector-pc.md`).
