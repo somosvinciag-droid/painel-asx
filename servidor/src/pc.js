@@ -412,9 +412,10 @@ export const PC_INSTRUCOES =
   'o Leonardo e mande a resposta dele com responder_tarefa_pc. Primeira vez num PC: ele abre "Ligar conector do PC" e o código de ' +
   '6 dígitos que aparece vai no ligar_pc (com apelido; principal = true se for o PC dele). EDITOR TOLEDO POR VOZ: mudança ' +
   'no editor = tarefa_no_pc (onde = "editor") pedindo para fazer SÓ no ramo previa do repositório %USERPROFILE%\\Editor Toledo\\repo ' +
-  '(subir VERSAO, NOVIDADES.md, testes, git push origin previa) e contar o que mudou. Quando o Leonardo disser a palavra ' +
-  '"libera" (ele mesmo, nesta conversa), mande outra tarefa onde = "editor": git push origin previa:principal nesse repositório, ' +
-  'depois py.bat --atualizar e seguranca.py integridade criar + conferir. Sem a palavra "libera" dele, nunca vai para o principal.';
+  '(subir VERSAO, NOVIDADES.md, testes, git push origin previa). Regra do Leonardo de 20/11: se TODOS os testes ' +
+  'passarem (100%), a mesma tarefa já libera sozinha (git push origin previa:principal, py.bat --atualizar, seguranca.py ' +
+  'integridade criar + conferir) e conta o que mudou; se algum teste falhar, NÃO libera e conta o que falhou. ' +
+  '"libera" dele libera na hora; "volta" = voltar para a versão anterior (py.bat --voltar).';
 
 const sem = { type: 'object', properties: {}, additionalProperties: true };
 const campoPc = { type: 'string', description: 'qual PC: apelido ("PC do Leonardo"), nome do Windows ou id. Vazio = o principal' };
