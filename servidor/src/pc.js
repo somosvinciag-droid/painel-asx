@@ -410,7 +410,11 @@ export const PC_INSTRUCOES =
   'o PRINCIPAL; se ele citar outro ("no PC da Gabriela"), passe pc com o apelido ou o nome. Tarefa longa: responda que começou e ' +
   'use ver_tarefa_pc depois (chega aviso no celular quando acaba). Se a tarefa voltar com estado "pergunta", leia a pergunta para ' +
   'o Leonardo e mande a resposta dele com responder_tarefa_pc. Primeira vez num PC: ele abre "Ligar conector do PC" e o código de ' +
-  '6 dígitos que aparece vai no ligar_pc (com apelido; principal = true se for o PC dele).';
+  '6 dígitos que aparece vai no ligar_pc (com apelido; principal = true se for o PC dele). EDITOR TOLEDO POR VOZ: mudança ' +
+  'no editor = tarefa_no_pc (onde = "editor") pedindo para fazer SÓ no ramo previa do repositório %USERPROFILE%\\Editor Toledo\\repo ' +
+  '(subir VERSAO, NOVIDADES.md, testes, git push origin previa) e contar o que mudou. Quando o Leonardo disser a palavra ' +
+  '"libera" (ele mesmo, nesta conversa), mande outra tarefa onde = "editor": git push origin previa:principal nesse repositório, ' +
+  'depois py.bat --atualizar e seguranca.py integridade criar + conferir. Sem a palavra "libera" dele, nunca vai para o principal.';
 
 const sem = { type: 'object', properties: {}, additionalProperties: true };
 const campoPc = { type: 'string', description: 'qual PC: apelido ("PC do Leonardo"), nome do Windows ou id. Vazio = o principal' };
