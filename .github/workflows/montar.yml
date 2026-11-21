@@ -11,6 +11,7 @@ on:
     paths-ignore:
       - 'servidor/**'
       - 'celular/**'
+      - 'robo/**'
       - '.github/**'
       - '**/*.md'
   workflow_dispatch:

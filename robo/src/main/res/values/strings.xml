@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nome_app">Painel Redmi</string>
+    <string name="descricao_robo">Deixa o Claude usar este celular pelo conector do Leonardo: lê a tela, toca, desliza, escreve e tira print. Só neste Redmi robô.</string>
+</resources>

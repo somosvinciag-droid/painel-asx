@@ -1,6 +1,7 @@
 // Painel ASX — conector entre o Claude do Leonardo e a central do carro. (publicado por conector.yml)
 // Também leva tarefas para o PC dele (pc.js: /pc/* e as ferramentas *_pc).
 import { ParteDoPC, PC_FERRAMENTAS, PC_INSTRUCOES } from './pc.js';
+import { ParteDoRobo, ROBO_FERRAMENTAS, ROBO_INSTRUCOES } from './robo.js';
 //
 // Duas pontas:
 //  - /app/*        a central (app Painel ASX) manda o estado e os erros e busca comandos.
@@ -15,8 +16,24 @@ import { ParteDoPC, PC_FERRAMENTAS, PC_INSTRUCOES } from './pc.js';
 
 export default {
   async fetch(request, env) {
-    const id = env.CENTRAL.idFromName('asx');
-    return env.CENTRAL.get(id).fetch(request);
+    // VAGAS: sem prefixo = 'asx' (o CARRO e o PC, exatamente como antes: a requisição passa intacta).
+    // /d/<aparelho>/... = cofre próprio daquele aparelho (ex.: /d/redmi = o celular robô "Painel Redmi").
+    const url = new URL(request.url);
+    const m = url.pathname.match(/^\/d\/([a-z0-9-]{1,24})(\/.*)?$/);
+    if (!m || m[1] === 'asx') {
+      if (request.headers.has('X-Painel-Vaga')) {
+        const h = new Headers(request.headers);
+        h.delete('X-Painel-Vaga');
+        request = new Request(request, { headers: h });
+      }
+      return env.CENTRAL.get(env.CENTRAL.idFromName('asx')).fetch(request);
+    }
+    url.pathname = m[2] || '/';
+    const h = new Headers(request.headers);
+    h.set('X-Painel-Vaga', m[1]);
+    const corpo = ['GET', 'HEAD'].includes(request.method) ? undefined : await request.arrayBuffer();
+    const novo = new Request(url.toString(), { method: request.method, headers: h, body: corpo });
+    return env.CENTRAL.get(env.CENTRAL.idFromName(m[1])).fetch(novo);
   }
 };
 
@@ -72,11 +89,14 @@ export class Central {
     this.esperandoComando = [];   // pedidos da central parados esperando comando
     this.esperandoResultado = {}; // id do comando -> funcao que entrega o resultado
     this.pc = new ParteDoPC(this);  // tarefas do computador do Leonardo
+    this.robo = new ParteDoRobo(this); // celular robô (vaga /d/redmi)
+    this.hora = horaBR;
   }
 
   async fetch(request) {
     const url = new URL(request.url);
     const p = url.pathname;
+    const vaga = request.headers.get('X-Painel-Vaga') || 'asx';
     try {
       if (p === '/' || p === '') return new Response('Painel ASX — conector da central do ASX.', { status: 200 });
       if (p === '/app/registrar') return await this.registrar(request);
@@ -92,10 +112,11 @@ export class Central {
         if (p === '/app/lembrete') return await this.lembrete(request);
         if (p === '/app/backup') return await this.backup(request);
         if (p === '/app/jarvis') return await this.jarvis(request);
+        if (p === '/app/arquivo' && vaga !== 'asx') return await this.robo.rotaArquivo(request, json);
         return json({ erro: 'rota desconhecida' }, 404);
       }
-      if (p.startsWith('/pc/')) return await this.pc.rota(request, p, { json, sha256, iguais });
-      if (p.startsWith('/mcp/')) return await this.mcp(request, p.slice('/mcp/'.length).replace(/\/+$/, ''));
+      if (p.startsWith('/pc/') && vaga === 'asx') return await this.pc.rota(request, p, { json, sha256, iguais });
+      if (p.startsWith('/mcp/')) return await this.mcp(request, p.slice('/mcp/'.length).replace(/\/+$/, ''), vaga);
       return new Response('Não encontrado', { status: 404 });
     } catch (e) {
       return json({ erro: String((e && e.message) || e).slice(0, 300) }, 500);
@@ -357,7 +378,7 @@ export class Central {
     return json({ ok: true });
   }
 
-  async enviarComando(tipo, texto) {
+  async enviarComando(tipo, texto, esperaMs = ESPERA_RES_MS) {
     const visto = (await this.ctx.storage.get('visto')) || 0;
     if (Date.now() - visto > ONLINE_MS) {
       return { erro: `A central está offline (carro desligado, sem internet ou app fechado). Último contato: ${horaBR(visto)}.` };
@@ -367,7 +388,7 @@ export class Central {
       const t = setTimeout(() => {
         delete this.esperandoResultado[cmd.id];
         resolve(null);
-      }, ESPERA_RES_MS);
+      }, esperaMs);
       this.esperandoResultado[cmd.id] = r => { clearTimeout(t); resolve(r); };
     });
     // Entrega na hora a quem estiver esperando (o pedido mais novo); senao, deixa na fila.
@@ -388,8 +409,9 @@ export class Central {
 
   // ------------------------------------------------------------------ Claude (MCP)
 
-  async ferramenta(nome, a) {
+  async ferramenta(nome, a, vaga = 'asx') {
     const s = this.ctx.storage;
+    if (vaga !== 'asx') return this.robo.ferramenta(nome, a);
     if (PC_FERRAMENTAS.some(f => f.name === nome)) return this.pc.ferramenta(nome, a, { sha256, iguais });
     if (nome === 'estado_central') {
       const [visto, estado, registrado] = [await s.get('visto'), await s.get('estado'), await s.get('registrado')];
@@ -498,7 +520,8 @@ export class Central {
     return { erro: 'Ferramenta desconhecida: ' + nome };
   }
 
-  async mcp(request, token) {
+  async mcp(request, token, vaga = 'asx') {
+    const LISTA = vaga === 'asx' ? TODAS : ROBO_FERRAMENTAS;
     const nada = () => new Response('Não encontrado', { status: 404 });
     if (token.length < 24 || token.length > 120) return nada();
     const h = await this.ctx.storage.get('mcpHash');
@@ -521,26 +544,28 @@ export class Central {
           respostas.push(okMcp(id, {
             protocolVersion: (p.params && p.params.protocolVersion) || '2025-06-18',
             capabilities: { tools: { listChanged: false } },
-            serverInfo: { name: 'painel-asx', title: 'Painel ASX — central do carro', version: '1.0.0' },
-            instructions: INSTRUCOES + PC_INSTRUCOES
+            serverInfo: vaga === 'asx'
+              ? { name: 'painel-asx', title: 'Painel ASX — central do carro', version: '1.0.0' }
+              : { name: 'painel-redmi', title: 'Painel Redmi — celular robô', version: '1.0.0' },
+            instructions: vaga === 'asx' ? INSTRUCOES + PC_INSTRUCOES : ROBO_INSTRUCOES
           }));
         } else if (p.method === 'ping') {
           if (temId) respostas.push(okMcp(id, {}));
         } else if (p.method === 'tools/list') {
-          respostas.push(okMcp(id, { tools: TODAS }));
+          respostas.push(okMcp(id, { tools: LISTA }));
         } else if (p.method === 'tools/call') {
           let nome = p.params && p.params.name;
           const args = (p.params && p.params.arguments) || {};
-          if (args.acao && TODAS.some(f => f.name === args.acao)) nome = args.acao;
-          if (!TODAS.some(f => f.name === nome)) {
+          if (args.acao && LISTA.some(f => f.name === args.acao)) nome = args.acao;
+          if (!LISTA.some(f => f.name === nome)) {
             respostas.push(erroMcp(id, -32602, 'Ferramenta desconhecida: ' + nome));
           } else {
             let r;
-            try { r = await this.ferramenta(nome, args); } catch (e) { r = { erro: 'falhou: ' + String((e && e.message) || e).slice(0, 200) }; }
+            try { r = await this.ferramenta(nome, args, vaga); } catch (e) { r = { erro: 'falhou: ' + String((e && e.message) || e).slice(0, 200) }; }
             if (r && r.imagem) {
               respostas.push(okMcp(id, { content: [
                 { type: 'image', data: r.imagem, mimeType: 'image/jpeg' },
-                { type: 'text', text: 'Foto da câmera ' + (r.camera || '') + ' da central.' }
+                { type: 'text', text: r.legenda || ('Foto da câmera ' + (r.camera || '') + ' da central.') }
               ] }));
             } else {
               respostas.push(okMcp(id, { content: [{ type: 'text', text: JSON.stringify(r) }], isError: !!(r && r.erro) }));
