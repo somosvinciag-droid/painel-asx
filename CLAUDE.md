@@ -559,3 +559,8 @@ Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica
   - `esquecer` fecha as tarefas abertas do PC; o id de PC nunca se repete (`pcProximo`). `ligar_pc` com o mesmo nome
     do Windows de um PC ONLINE não troca a chave calado (`novo = true` / `trocar = true`, só com o OK do Leonardo).
   - As tarefas abertas nunca saem da lista (mesmo com mais de 60).
+- Crédito (26/11, agente 1.8.0+, 42 testes): o PC recebe `tela` e `peso` em cada item (`itemNova`); `peso` leve = modelo
+  menor no PC. `/pc/resultado` traz `gasto` (custo equivalente, tokens, rodadas) → `t.gasto` e soma por dia em `pcGasto`
+  (31 dias; por PC, de onde e tipo) → ferramenta `gasto_pc`. `ver_tarefa_pc` espera até 45 s; tarefa rodando volta magra
+  com `previsao` (mediana das 10 últimas parecidas). `reaproveitar = true` devolve o mesmo pedido feito no mesmo PC nas
+  últimas 12 h. Instruções e descrições das ferramentas encurtadas (~5,7 mil letras em vez de ~8 mil).

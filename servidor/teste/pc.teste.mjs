@@ -165,5 +165,37 @@ const L = 'PC do Leonardo', G = 'PC Gabriela';
   for (let i = 0; i < 70; i++) { const t = await T(P, { texto: 't' + i, pc: G, tela: false }); await poll(P, K2); await res(P, K2, t.id); }
   conf('mais de 60 tarefas: a que ainda roda não some da lista', (await ver(P, a.id)).estado === 'rodando' && (await P.tarefas()).length <= 61);
 }
+{ // 11 crédito (agente 1.8.0): tela e peso vão ao PC, gasto, previsão, reaproveitar, conferida magra
+  const P = await setup();
+  const a = await T(P, { texto: 'lista os arquivos', pc: L, tela: false, peso: 'leve', origem: 'celular' });
+  let r = await poll(P, K1);
+  const it = r.o.tarefas.find(x => x.id === a.id);
+  conf('o PC recebe tela=false e peso=leve', it && it.tela === false && it.peso === 'leve', it);
+  const b = await T(P, { texto: 'sobe o produto', pc: L, tela: true });
+  r = await poll(P, K1);
+  const itb = r.o.tarefas.find(x => x.id === b.id);
+  conf('tarefa sem peso vai como normal e com tela=true', itb && itb.tela === true && itb.peso === 'normal', itb);
+  await P.rota(req({ id: a.id, estado: 'feita', resposta: 'ok', gasto: { custo_usd: 0.25, rodadas: 4, entrada: 100, saida: 50, cache_novo: 1000, cache_lido: 5000, modelo: 'sonnet' } }, K1), '/pc/resultado', U);
+  await P.rota(req({ id: b.id, estado: 'feita', resposta: 'ok', gasto: { custo_usd: 1.5, rodadas: 30, entrada: 10, saida: 10, cache_novo: 10, cache_lido: 10, modelo: 'opus' } }, K1), '/pc/resultado', U);
+  const v = await ver(P, a.id);
+  conf('a tarefa feita mostra o gasto', v.gasto && v.gasto.custo_usd === 0.25 && v.gasto.tokens === 6150, v.gasto);
+  const gst = await F(P, 'gasto_pc', {});
+  conf('gasto_pc soma por dia, por tipo e mostra a mais cara primeiro',
+    gst.total && gst.total.n === 2 && Math.abs(gst.total.custo - 1.75) < 1e-9 && gst.mais_caras[0].id === b.id &&
+    gst.por_grupo.some(g => /tipo: tela/.test(g.grupo)) && gst.por_grupo.some(g => /arquivos\/leve/.test(g.grupo)), gst);
+  r = await T(P, { texto: 'lista os arquivos', pc: L, tela: false, reaproveitar: true });
+  conf('reaproveitar: mesmo pedido feito há pouco volta sem rodar de novo', r.id === a.id && /Reaproveitada/.test(r.aviso || ''), r);
+  r = await T(P, { texto: 'lista os arquivos', pc: G, tela: false, reaproveitar: true });
+  conf('reaproveitar não pega tarefa de OUTRO PC', r.id !== a.id && !/Reaproveitada/.test(r.aviso || ''), r);
+  r = await T(P, { texto: 'lista os arquivos', pc: L, tela: false });
+  conf('sem reaproveitar: roda de novo', r.id !== a.id, r);
+  // previsão: 3 tarefas parecidas de ~10 min
+  const P2 = await setup();
+  for (let i = 0; i < 3; i++) { const t = await T(P2, { texto: 'x' + i, pc: L, tela: false }); await poll(P2, K1); off += 10 * 60e3; await res(P2, K1, t.id); }
+  const c = await T(P2, { texto: 'nova', pc: L, tela: false }); await poll(P2, K1); await and(P2, K1, c.id); off += 4 * 60e3;
+  const vc = await ver(P2, c.id);
+  conf('rodando: resposta magra (sem o pedido inteiro) e com previsão', /falta ~6 min/.test(vc.previsao || '') && !('criada' in vc), vc);
+  off = 0;
+}
 console.log(`\nServidor do conector do PC: ${ok} de ${total} certos (${Math.round(100 * ok / total)}%)`);
 process.exit(ok === total ? 0 : 1);
