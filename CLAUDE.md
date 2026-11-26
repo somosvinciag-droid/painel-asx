@@ -542,3 +542,20 @@ Painel" (`CaboUsb.MODO_AA`); "app do celular" (`MODO_APP`, o JSON de antes) fica
   (`pcFila:<id>`, `pcVisto:<id>`, `pcInfo:<id>`), cada tarefa guarda `pc`. Sem `pc` a tarefa vai para o PRINCIPAL (o PC DELE).
   Mesmo hostname com chave nova = troca a chave e mantém apelido. O PC "DESKTOP-UU83OER" (usuário Gabriela Landim) NÃO é o dele.
 - O agente do PC está no repositório `editor-toledo-marketing` (`conector/agente_pc.py`, `docs/conector-pc.md`).
+- Trava de tela por PC (26/11): tarefa de tela (`tela = true`) espera outra de tela do MESMO PC (`aguardando`,
+  `continuar`); `tela = false` roda junto. `liberarTela` em cada busca do PC, no resultado e no cancelar.
+- Regras depois do juiz e do caçador de problemas (26/11, `node servidor/teste/pc.teste.mjs`, 34 testes):
+  - REGRA DO LEONARDO ("lei marcial"): cada conversa PERGUNTA no começo em qual PC roda e manda tudo só para ele.
+    Com 2+ PCs, `pc` vazio é recusado em `tarefa_no_pc` e `ajustar_pc` (`escolher(qual, true)`); "meu PC" = principal.
+    O servidor não sugere mais trocar de PC.
+  - `tela` é obrigatório (com `onde = "editor"` e sem `tela` vale false).
+  - `ver_tarefa_pc`, `responder_tarefa_pc` e `cancelar_tarefa_pc` exigem `id` (sem id devolvem a lista das abertas:
+    `pedirId`); responder em tarefa cancelada é recusado.
+  - Agente 1.7.0+ manda `ids` em `/pc/pedidos` (tarefas que ele tem): `conferirIds` renova o sinal de vida (`vivo`),
+    reentrega a tarefa entregue que o PC não recebeu (90 s, até 3 vezes; `entregue`, `item` da continuação) e marca
+    erro na que estava rodando e sumiu (3 min). Sem `ids` (agente antigo) nada disso roda.
+  - Dona da tela ainda não entregue (PC desligado) não vence; entregue e sem NENHUM sinal por 50 min = morta
+    (maior que o limite de 45 min da tarefa no agente). Guardada mais de 6 h = erro (antes ficava "fila" para sempre).
+  - `esquecer` fecha as tarefas abertas do PC; o id de PC nunca se repete (`pcProximo`). `ligar_pc` com o mesmo nome
+    do Windows de um PC ONLINE não troca a chave calado (`novo = true` / `trocar = true`, só com o OK do Leonardo).
+  - As tarefas abertas nunca saem da lista (mesmo com mais de 60).
